@@ -24,15 +24,19 @@ public sealed class SystemForegroundSource : IForegroundSource
 public sealed class FormsTickScheduler : ITickScheduler
 {
     private readonly System.Windows.Forms.Timer _timer;
+    private readonly IAppLogger _logger;
     private EventHandler? _handler;
 
-    public FormsTickScheduler(int intervalMs) =>
+    public FormsTickScheduler(int intervalMs, IAppLogger? logger = null)
+    {
         _timer = new System.Windows.Forms.Timer { Interval = intervalMs };
+        _logger = logger ?? NullLogger.Instance;
+    }
 
     public void Start(Action tick)
     {
         Stop();
-        _handler = (_, _) => { try { tick(); } catch (Exception ex) { OverlayConfig.Log("Timer", $"Tick: {ex.Message}"); } };
+        _handler = (_, _) => { try { tick(); } catch (Exception ex) { _logger.Log("Timer", $"Tick: {ex.Message}"); } };
         _timer.Tick += _handler;
         _timer.Start();
     }
@@ -51,6 +55,11 @@ public sealed class FormsTickScheduler : ITickScheduler
     {
         _timer.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    internal void FireForTest()
+    {
+        _handler?.Invoke(_timer, EventArgs.Empty);
     }
 }
 

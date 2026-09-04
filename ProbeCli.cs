@@ -58,7 +58,7 @@ public static class ProbeCli
 
         try
         {
-            var path = OverlayConfig.ProbeLogPath;
+            var path = new FileConfigStore().ProbeLogPath;
             var dir = Path.GetDirectoryName(path);
             if (dir != null && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);

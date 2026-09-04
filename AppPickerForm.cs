@@ -19,6 +19,8 @@ public class AppPickerForm : Form
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(420, 320);
+        TopMost = true;
+        Shown += (_, _) => { Activate(); BringToFront(); _list.Focus(); };
 
         _list.Location = new Point(12, 12);
         _list.Size = new Size(396, 240);

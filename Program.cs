@@ -26,9 +26,13 @@ public class TimerAppContext : ApplicationContext
 {
     private readonly TaskbarOverlayForm _overlay;
     private readonly NotifyIcon _trayIcon;
+    private readonly IConfigStore _configStore;
+    private readonly IAppLogger _logger;
     private readonly OverlayConfig _config;
-    private readonly ForegroundTimer _timer = new();
+    private readonly ForegroundTimer _timer;
     private readonly Database _db;
+    private readonly ChannelSessionStore _store;
+    private readonly SessionCoordinator _coordinator;
     private readonly System.Windows.Forms.Timer _flushTimer = new() { Interval = 60_000 };
 
     private ToolStripMenuItem _startPauseItem = default!;
@@ -36,15 +40,24 @@ public class TimerAppContext : ApplicationContext
     private ToolStripMenuItem _stopItem = default!;
     private ToolStripMenuItem _appItem = default!;
 
-    private long? _sessionId;
-    private long? _blockId;
-    private double _lastLapStart;
+    private long? _sessionId => _coordinator.SessionId;
+    private long? _blockId => _coordinator.BlockId;
 
     public TimerAppContext()
+        : this(FileLogger.Default, new FileConfigStore(), null, null)
     {
-        _config = OverlayConfig.Load();
+    }
+
+    internal TimerAppContext(IAppLogger logger, IConfigStore configStore, ForegroundTimer? timer, ISessionStore? store)
+    {
+        _logger = logger;
+        _configStore = configStore;
+        _config = _configStore.Load();
         _db = new Database();
-        try { _db.CloseStaleActive(); } catch (Exception ex) { OverlayConfig.Log("App", $"Crash recovery: {ex.Message}"); }
+        _timer = timer ?? new ForegroundTimer(new SystemForegroundSource(), new FormsTickScheduler(ForegroundTimer.PollIntervalMs, _logger));
+        _store = store as ChannelSessionStore ?? new ChannelSessionStore(_db);
+        _coordinator = new SessionCoordinator(_timer, _store, SystemClock.Instance);
+        try { _store.CloseStaleActiveAsync().GetAwaiter().GetResult(); } catch (Exception ex) { _logger.Log("App", $"Crash recovery: {ex.Message}"); }
 
         _trayIcon = new NotifyIcon
         {
@@ -55,7 +68,7 @@ public class TimerAppContext : ApplicationContext
         };
 
         _appItem = new ToolStripMenuItem("Select app...") { Enabled = true };
-        _appItem.Click += (_, _) => PickApp();
+        _appItem.Click += async (_, _) => await PickAppAsync();
         _trayIcon.ContextMenuStrip.Items.Add(_appItem);
 
         _trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
@@ -65,14 +78,15 @@ public class TimerAppContext : ApplicationContext
         _trayIcon.ContextMenuStrip.Items.Add(_startPauseItem);
 
         _lapItem = new ToolStripMenuItem("🏁 Lap") { Enabled = false };
-        _lapItem.Click += (_, _) => DoLap();
+        _lapItem.Click += async (_, _) => await DoLapAsync();
         _trayIcon.ContextMenuStrip.Items.Add(_lapItem);
 
         _stopItem = new ToolStripMenuItem("⏹ Stop") { Enabled = false };
-        _stopItem.Click += (_, _) => DoStop();
+        _stopItem.Click += async (_, _) => await DoStopAsync();
         _trayIcon.ContextMenuStrip.Items.Add(_stopItem);
 
         _trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
+        _trayIcon.ContextMenuStrip.Items.Add("Settings...", null, (_, _) => OpenSettings());
         _trayIcon.ContextMenuStrip.Items.Add("Auto-start", null, (_, _) => ToggleAutoStart());
         _trayIcon.ContextMenuStrip.Items.Add("Exit", null, (_, _) =>
         {
@@ -80,7 +94,7 @@ public class TimerAppContext : ApplicationContext
             Application.Exit();
         });
 
-        _overlay = new TaskbarOverlayForm();
+        _overlay = new TaskbarOverlayForm(_logger);
         _overlay.ApplyConfig(_config);
         _overlay.LeftClicked += OnOverlayClicked;
         _overlay.RightClicked += () => _trayIcon.ContextMenuStrip?.Show(Cursor.Position);
@@ -88,18 +102,10 @@ public class TimerAppContext : ApplicationContext
 
         _timer.Ticked += OnTimerTick;
 
-        _flushTimer.Tick += (_, _) =>
+        _flushTimer.Tick += async (_, _) =>
         {
-            try
-            {
-                if (_sessionId.HasValue && _blockId.HasValue)
-                {
-                    var elapsed = _timer.ElapsedSeconds;
-                    _db.UpdateSessionDuration(_sessionId.Value, elapsed);
-                    _db.UpdateBlockDuration(_blockId.Value, elapsed - _lastLapStart);
-                }
-            }
-            catch (Exception ex) { OverlayConfig.Log("App", $"Flush: {ex.Message}"); }
+            try { await _coordinator.FlushAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.Log("App", $"Flush: {ex.Message}"); }
         };
         _flushTimer.Start();
 
@@ -128,7 +134,7 @@ public class TimerAppContext : ApplicationContext
             }
             RefreshUi(tick);
         }
-        catch (Exception ex) { OverlayConfig.Log("App", $"OnTimerTick: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"OnTimerTick: {ex.Message}"); }
     }
 
     private void RefreshUi(TimerTick tick)
@@ -151,19 +157,19 @@ public class TimerAppContext : ApplicationContext
 
         if (tick.Running)
         {
-            _overlay.SetTimer($"⏱ {clock}");
+            _overlay.SetTimer($"⏸ {clock}");
             _trayIcon.Text = $"PulseTrack - {clock} · {app}";
             _startPauseItem.Text = "⏸ Pause";
         }
         else if (tick.ElapsedSeconds > 0)
         {
-            _overlay.SetTimer($"⏸ {clock}");
+            _overlay.SetTimer($"▶ {clock}");
             _trayIcon.Text = $"PulseTrack - Paused {clock} · {app}";
             _startPauseItem.Text = "▶ Resume";
         }
         else
         {
-            _overlay.SetTimer($"⏱ 00:00:00");
+            _overlay.SetTimer($"▶ 00:00:00");
             _trayIcon.Text = $"PulseTrack - Ready · {app}";
             _startPauseItem.Text = "▶ Start";
         }
@@ -173,89 +179,76 @@ public class TimerAppContext : ApplicationContext
         _stopItem.Enabled = tick.ElapsedSeconds > 0 || tick.Running;
     }
 
-    private void PickApp()
+    private async Task PickAppAsync()
     {
         try
         {
             using var form = new AppPickerForm(_timer.SelectedApp ?? _config.LastApp);
             if (form.ShowDialog() == DialogResult.OK && form.SelectedApp != null)
             {
-                if (_timer.Running || _timer.ElapsedSeconds > 0)
-                    DoStop();
-                _timer.Start(form.SelectedApp);
-                var now = DateTime.UtcNow.ToString("o");
-                _sessionId = _db.CreateSession(form.SelectedApp, now);
-                _blockId = _db.CreateBlock(_sessionId.Value, form.SelectedApp, "Lap 1", now);
-                _lastLapStart = 0;
-                _timer.Pause();
+                await _coordinator.PickAppAsync(form.SelectedApp).ConfigureAwait(true);
                 _config.LastApp = form.SelectedApp;
-                _config.Save();
-                RefreshUi(new TimerTick(0, false, 0, Array.Empty<LapInfo>()));
+                _configStore.Save(_config);
+                RefreshUi(new TimerTick(0, true, 0, Array.Empty<LapInfo>()));
             }
         }
-        catch (Exception ex) { OverlayConfig.Log("App", $"PickApp: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"PickApp: {ex.Message}"); }
     }
 
     private void ToggleStartPause()
     {
         try
         {
-            if (_timer.SelectedApp == null)
-            {
-                PickApp();
-                return;
-            }
-            if (_timer.Running)
-                _timer.Pause();
-            else
-                _timer.Resume();
+            if (!_coordinator.ToggleStartPause())
+                _ = PickAppAsync();
         }
-        catch (Exception ex) { OverlayConfig.Log("App", $"ToggleStartPause: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"ToggleStartPause: {ex.Message}"); }
     }
 
-    private void DoLap()
+    private async Task DoLapAsync()
     {
-        try
-        {
-            if (!_timer.Running || !_sessionId.HasValue || !_blockId.HasValue) return;
-            var now = DateTime.UtcNow.ToString("o");
-            var elapsed = _timer.ElapsedSeconds;
-            _db.CloseBlock(_blockId.Value, now, elapsed - _lastLapStart);
-            _timer.Lap();
-            var lapCount = _timer.Laps.Count;
-            _blockId = _db.CreateBlock(_sessionId.Value, _timer.SelectedApp!, $"Lap {lapCount}", now);
-            _lastLapStart = elapsed;
-            _db.UpdateSessionDuration(_sessionId.Value, elapsed);
-        }
-        catch (Exception ex) { OverlayConfig.Log("App", $"DoLap: {ex.Message}"); }
+        try { await _coordinator.LapAsync().ConfigureAwait(true); }
+        catch (Exception ex) { _logger.Log("App", $"DoLap: {ex.Message}"); }
     }
 
-    private void DoStop()
+    private async Task DoStopAsync()
     {
         try
         {
             if (_timer.SelectedApp == null) return;
-            var now = DateTime.UtcNow.ToString("o");
-            var elapsed = _timer.ElapsedSeconds;
-            if (_sessionId.HasValue && _blockId.HasValue)
-            {
-                _db.CloseBlock(_blockId.Value, now, elapsed - _lastLapStart);
-                _db.CloseSession(_sessionId.Value, now, elapsed);
-            }
-            _timer.Stop();
-            _sessionId = null;
-            _blockId = null;
-            _lastLapStart = 0;
+            await _coordinator.StopAsync().ConfigureAwait(true);
             _overlay.SetTimer("Choose app");
             _trayIcon.Text = "PulseTrack - Detenido";
         }
-        catch (Exception ex) { OverlayConfig.Log("App", $"DoStop: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"DoStop: {ex.Message}"); }
     }
 
     private void OnOverlayClicked()
     {
         try { ToggleStartPause(); }
-        catch (Exception ex) { OverlayConfig.Log("App", $"OverlayClicked: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"OverlayClicked: {ex.Message}"); }
+    }
+
+    private void OpenSettings()
+    {
+        try
+        {
+            var vm = new SettingsViewModel(_configStore);
+            using var form = new SettingsForm(vm);
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                var updated = vm.Apply();
+                _config.FontFamily = updated.FontFamily;
+                _config.FontSize = updated.FontSize;
+                _config.FontStyle = updated.FontStyle;
+                _config.TextColorArgb = updated.TextColorArgb;
+                _config.TextAlpha = updated.TextAlpha;
+                _config.ShowBackground = updated.ShowBackground;
+                _config.BackgroundColorArgb = updated.BackgroundColorArgb;
+                _overlay.ApplyConfig(_config);
+            }
+        }
+        catch (Exception ex) { _logger.Log("App", $"Settings: {ex.Message}"); }
     }
 
     private void ToggleAutoStart()
@@ -280,18 +273,18 @@ public class TimerAppContext : ApplicationContext
                 _trayIcon.ShowBalloonTip(2000, "PulseTrack", "Auto-start enabled", ToolTipIcon.Info);
             }
         }
-        catch (Exception ex) { OverlayConfig.Log("App", $"ToggleAutoStart: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"ToggleAutoStart: {ex.Message}"); }
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            try { if (_sessionId.HasValue && _blockId.HasValue) DoStop(); } catch { }
+            try { if (_coordinator.SessionId.HasValue) _coordinator.StopAsync().GetAwaiter().GetResult(); } catch { }
             _flushTimer.Dispose();
             _timer.Dispose();
-            _db.Dispose();
-            _config.Save();
+            _store.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _configStore.Save(_config);
             _overlay?.Dispose();
             _trayIcon?.Dispose();
         }

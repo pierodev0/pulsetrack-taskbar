@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 
 namespace PulseTrack.Taskbar;
 
-public sealed class Database : IDisposable
+public sealed class Database : ISessionRepository
 {
     private readonly SqliteConnection _conn;
 

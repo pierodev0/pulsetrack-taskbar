@@ -1,28 +1,19 @@
-using System.Runtime.InteropServices;
-using System.Text;
-
 namespace PulseTrack.Taskbar;
 
 public class TaskbarOverlayForm : Form
 {
-    private string _text = "";
-    private int _scrollOffset;
-    private int _textWidth;
-    private bool _idle => string.IsNullOrEmpty(_text);
-    private const int _preferredWidth = 160;
-    private const int _barHeight = 40;
-    private const int _gapFromNeighbor = 8;
     private const int _scrollSpeed = 2;
     private const int _scrollIntervalMs = 50;
     private const int _zBumpIntervalMs = 100;
 
-    private static readonly string[] _systemClasses =
-    {
-        "Start", "TrayNotifyWnd", "TrayDummySearchControl",
-        "ReBarWindow32", "MSTaskSwWClass", "MSTaskListWClass"
-    };
+    private readonly TaskbarLayout _layout;
+    private readonly IAppLogger _logger;
+    private ITaskbarWidget _widget = new StaticTextWidget("");
 
-    private IntPtr _taskbarHwnd;
+    private string _text = "";
+    private int _scrollOffset;
+    private int _textWidth;
+    private bool _idle => string.IsNullOrEmpty(_text);
     private bool _fullScreen;
     private readonly System.Windows.Forms.Timer _scrollTimer = new();
     private readonly System.Windows.Forms.Timer _reposTimer = new();
@@ -31,59 +22,45 @@ public class TaskbarOverlayForm : Form
     private bool _showBackground = true;
     private Color _bgColor = Color.FromArgb(180, 26, 26, 46);
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string? lpClassName, string? lpWindowName);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    private static readonly int WM_TASKBARCREATED_MSG = NativeMethods.RegisterWindowMessage("TaskbarCreated");
 
     public event Action? LeftClicked;
     public event Action? RightClicked;
 
-    private const uint SWP_NOACTIVATE = 0x0010;
-    private const uint SWP_NOMOVE = 0x0002;
-    private const uint SWP_NOSIZE = 0x0001;
-    private const int WM_GETOBJECT = 0x003D;
-    private const int WM_NCHITTEST = 0x0084;
-    private const int HTCLIENT = 1;
-    private const int HTTRANSPARENT = -1;
-
-    private struct RECT { public int left, top, right, bottom; public int W => right - left; public int H => bottom - top; }
-
-    private static readonly int WM_TASKBARCREATED_MSG = RegisterWindowMessage("TaskbarCreated");
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern int RegisterWindowMessage(string lpString);
-
-    public TaskbarOverlayForm()
+    public TaskbarOverlayForm(IAppLogger? logger = null, ITaskbarGeometry? geometry = null)
     {
+        _logger = logger ?? NullLogger.Instance;
+        _layout = new TaskbarLayout(geometry ?? new Win32TaskbarGeometry(), _logger);
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
         TransparencyKey = Color.Black;
         BackColor = Color.Black;
         DoubleBuffered = true;
-        Width = _preferredWidth;
-        Height = _barHeight;
+        Width = _widget.GetWidthHint();
+        Height = TaskbarLayout.BarHeight;
 
         _scrollTimer.Interval = _scrollIntervalMs;
-        _scrollTimer.Tick += (_, _) => { try { _scrollOffset -= _scrollSpeed; Invalidate(); } catch (Exception ex) { OverlayConfig.Log("Overlay", $"ScrollTimer: {ex.Message}"); } };
+        _scrollTimer.Tick += (_, _) => { try { OnScrollTick(); } catch (Exception ex) { _logger.Log("Overlay", $"ScrollTimer: {ex.Message}"); } };
 
         _reposTimer.Interval = _zBumpIntervalMs;
-        _reposTimer.Tick += (_, _) => { try { RepositionWithFullscreenCheck(); } catch (Exception ex) { OverlayConfig.Log("Overlay", $"ReposTimer: {ex.Message}"); } };
+        _reposTimer.Tick += (_, _) => { try { RepositionWithFullscreenCheck(); } catch (Exception ex) { _logger.Log("Overlay", $"ReposTimer: {ex.Message}"); } };
     }
+
+    public void SetWidget(ITaskbarWidget widget)
+    {
+        _widget = widget;
+        SetTimer(widget.GetText());
+    }
+
+    private void OnScrollTick()
+    {
+        _scrollOffset -= _scrollSpeed;
+        Invalidate();
+    }
+
+    internal void SimulateScrollErrorForTest(Exception ex) => _logger.Log("Overlay", $"ScrollTimer: {ex.Message}");
+    internal void SimulateReposErrorForTest(Exception ex) => _logger.Log("Overlay", $"ReposTimer: {ex.Message}");
 
     protected override CreateParams CreateParams
     {
@@ -98,16 +75,15 @@ public class TaskbarOverlayForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        _taskbarHwnd = FindWindow("Shell_TrayWnd", null);
         _reposTimer.Start();
         Reposition();
     }
 
     private void RepositionWithFullscreenCheck()
     {
-        var fg = GetForegroundWindow();
+        var pos = _layout.Compute(_widget.GetWidthHint());
         bool wasFull = _fullScreen;
-        _fullScreen = fg != Handle && fg != IntPtr.Zero && IsFullScreenApp(fg);
+        _fullScreen = pos.Fullscreen;
 
         if (_fullScreen)
         {
@@ -126,138 +102,24 @@ public class TaskbarOverlayForm : Form
         }
     }
 
-    private static bool IsFullScreenApp(IntPtr hWnd)
-    {
-        var clsSb = new StringBuilder(256);
-        int len = GetClassName(hWnd, clsSb, 256);
-        string cls = len > 0 ? clsSb.ToString(0, len) : "";
-        if (cls == "Progman" || cls == "WorkerW")
-            return false;
-
-        GetWindowRect(hWnd, out var r);
-        var screen = Screen.FromHandle(hWnd);
-        var b = screen.Bounds;
-        return r.left <= b.Left && r.top <= b.Top && r.right >= b.Right && r.bottom >= b.Bottom;
-    }
-
     private void Reposition()
     {
         if (!IsHandleCreated || IsDisposed) return;
 
-        if (_taskbarHwnd == IntPtr.Zero)
-            _taskbarHwnd = FindWindow("Shell_TrayWnd", null);
-
-        if (_taskbarHwnd == IntPtr.Zero) return;
-
-        GetWindowRect(_taskbarHwnd, out var tr);
-        int maxW = Math.Min(tr.W / 3, 280);
-
-        if (_idle)
-            Width = Math.Min(_preferredWidth, maxW);
-        else
-            Width = Math.Min(Math.Max(_textWidth + 30, 80), maxW);
-
-        Height = _barHeight;
-
-        int x = FindLeftOfTrayArea(tr);
-        int yCenter = tr.top + (tr.H - _barHeight) / 2;
-
-        Location = new Point(tr.left + x, yCenter);
-        SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
-    }
-
-    private int FindLeftOfTrayArea(RECT taskbarRect)
-    {
-        var startHwnd = FindWindowEx(_taskbarHwnd, IntPtr.Zero, "Start", null);
-        bool isCentered = startHwnd != IntPtr.Zero;
-        int startLeft = 0;
-        if (isCentered)
+        var pos = _layout.Compute(Math.Max(_textWidth + 30, _widget.GetWidthHint()));
+        if (pos.Fullscreen)
         {
-            GetWindowRect(startHwnd, out var startRect);
-            startLeft = startRect.left - taskbarRect.left;
-            isCentered = startLeft > taskbarRect.W * 0.2;
+            Visible = false;
+            _fullScreen = true;
+            return;
         }
+        _fullScreen = false;
 
-        if (!isCentered)
-            return RightOfRightmostChild(taskbarRect);
-
-        var trayHwnd = FindWindowEx(_taskbarHwnd, IntPtr.Zero, "TrayNotifyWnd", null);
-        if (trayHwnd != IntPtr.Zero)
-        {
-            GetWindowRect(trayHwnd, out var trayRect);
-            int candidateX = trayRect.left - taskbarRect.left - Width;
-
-            if (!HasChildInZone(trayRect.left - taskbarRect.left, candidateX))
-                return candidateX;
-        }
-
-        return Math.Max(startLeft - Width - _gapFromNeighbor, _gapFromNeighbor);
-    }
-
-    private bool HasChildInZone(int zoneRight, int zoneLeft)
-    {
-        var clsSb = new StringBuilder(256);
-        var child = IntPtr.Zero;
-        GetWindowRect(_taskbarHwnd, out var tr);
-
-        while ((child = FindWindowEx(_taskbarHwnd, child, null, null)) != IntPtr.Zero)
-        {
-            int len = GetClassName(child, clsSb, 256);
-            string cls = len > 0 ? clsSb.ToString(0, len) : "";
-            if (IsSystemWindow(cls, 0)) continue;
-
-            GetWindowRect(child, out var cr);
-
-            int childRight = cr.right - tr.left;
-            int childLeft = cr.left - tr.left;
-
-            if (childRight > zoneLeft && childLeft < zoneRight)
-                return true;
-        }
-
-        return false;
-    }
-
-    private int RightOfRightmostChild(RECT taskbarRect)
-    {
-        var clsSb = new StringBuilder(256);
-        var child = IntPtr.Zero;
-        int rightmostRight = 0;
-        int leftOfRightmost = taskbarRect.W;
-
-        while ((child = FindWindowEx(_taskbarHwnd, child, null, null)) != IntPtr.Zero)
-        {
-            GetWindowRect(child, out var cr);
-            int len = GetClassName(child, clsSb, 256);
-            string cls = len > 0 ? clsSb.ToString(0, len) : "";
-            int w = cr.W;
-            int childRight = cr.right - taskbarRect.left;
-
-            if (!IsSystemWindow(cls, w) && childRight > rightmostRight)
-            {
-                rightmostRight = childRight;
-                leftOfRightmost = cr.left - taskbarRect.left;
-            }
-        }
-
-        if (rightmostRight > 0)
-            return leftOfRightmost - Width - _gapFromNeighbor;
-
-        var trayHwnd = FindWindowEx(_taskbarHwnd, IntPtr.Zero, "TrayNotifyWnd", null);
-        if (trayHwnd != IntPtr.Zero)
-        {
-            GetWindowRect(trayHwnd, out var trayRect);
-            return trayRect.left - taskbarRect.left - Width - _gapFromNeighbor;
-        }
-        return taskbarRect.W - Width - 120;
-    }
-
-    private static bool IsSystemWindow(string className, int width)
-    {
-        if (className.StartsWith("Windows.UI.")) return true;
-        foreach (var c in _systemClasses)
-            if (className == c) return true;
-        return width < 30 || width > 500;
+        Width = pos.Width;
+        Height = pos.Height;
+        Location = new Point(pos.X, pos.Y);
+        NativeMethods.SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0,
+            NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
     }
 
     public void SetTimer(string text)
@@ -366,23 +228,22 @@ public class TaskbarOverlayForm : Form
     {
         if (m.Msg == WM_TASKBARCREATED_MSG)
         {
-            OverlayConfig.Log("Overlay", "WndProc: TaskbarCreated detected, re-positioning");
-            _taskbarHwnd = FindWindow("Shell_TrayWnd", null);
+            _logger.Log("Overlay", "WndProc: TaskbarCreated detected, re-positioning");
             Reposition();
             return;
         }
 
-        if (m.Msg == WM_GETOBJECT)
+        if (m.Msg == NativeMethods.WM_GETOBJECT)
         {
             m.Result = IntPtr.Zero;
             return;
         }
 
-        if (m.Msg == WM_NCHITTEST)
+        if (m.Msg == NativeMethods.WM_NCHITTEST)
         {
             base.WndProc(ref m);
-            if (m.Result == (IntPtr)HTTRANSPARENT)
-                m.Result = (IntPtr)HTCLIENT;
+            if (m.Result == (IntPtr)NativeMethods.HTTRANSPARENT)
+                m.Result = (IntPtr)NativeMethods.HTCLIENT;
             return;
         }
 
@@ -398,5 +259,13 @@ public class TaskbarOverlayForm : Form
             _reposTimer.Dispose();
         }
         base.Dispose(disposing);
+    }
+
+    private sealed class StaticTextWidget(string text) : ITaskbarWidget
+    {
+        public string Id => "static";
+        public string GetText() => text;
+        public int GetWidthHint() => 200;
+        public void Refresh(TimerTick tick) { }
     }
 }
