@@ -12,4 +12,7 @@ public class OverlayConfig
     public int BackgroundAlpha { get; set; } = 180;
     public int TransparencyKeyArgb { get; set; } = unchecked((int)0xFF000000);
     public string LastApp { get; set; } = "";
+    public int PipX { get; set; } = -1;
+    public int PipY { get; set; } = -1;
+    public bool PipVisible { get; set; } = false;
 }

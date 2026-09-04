@@ -1,6 +1,8 @@
 bin/
 obj/
 publish-single/
+publish-portable/
+dist/
 *.log
 .vs/
 .atl/

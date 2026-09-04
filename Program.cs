@@ -39,6 +39,9 @@ public class TimerAppContext : ApplicationContext
     private ToolStripMenuItem _lapItem = default!;
     private ToolStripMenuItem _stopItem = default!;
     private ToolStripMenuItem _appItem = default!;
+    private ToolStripMenuItem _pipItem = default!;
+    private PipForm? _pip;
+    private PipViewModel? _pipVm;
 
     private long? _sessionId => _coordinator.SessionId;
     private long? _blockId => _coordinator.BlockId;
@@ -86,6 +89,9 @@ public class TimerAppContext : ApplicationContext
         _trayIcon.ContextMenuStrip.Items.Add(_stopItem);
 
         _trayIcon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
+        _pipItem = new ToolStripMenuItem("Picture in Picture");
+        _pipItem.Click += (_, _) => TogglePip();
+        _trayIcon.ContextMenuStrip.Items.Add(_pipItem);
         _trayIcon.ContextMenuStrip.Items.Add("Settings...", null, (_, _) => OpenSettings());
         _trayIcon.ContextMenuStrip.Items.Add("Auto-start", null, (_, _) => ToggleAutoStart());
         _trayIcon.ContextMenuStrip.Items.Add("Exit", null, (_, _) =>
@@ -124,7 +130,6 @@ public class TimerAppContext : ApplicationContext
     {
         try
         {
-            if (_overlay.IsDisposed) return;
             if (_overlay.InvokeRequired)
             {
                 try { _overlay.BeginInvoke(() => OnTimerTick(tick)); }
@@ -132,7 +137,9 @@ public class TimerAppContext : ApplicationContext
                 catch (InvalidOperationException) { }
                 return;
             }
-            RefreshUi(tick);
+            if (!_overlay.IsDisposed)
+                RefreshUi(tick);
+            _pip?.UpdateUi(tick);
         }
         catch (Exception ex) { _logger.Log("App", $"OnTimerTick: {ex.Message}"); }
     }
@@ -229,6 +236,68 @@ public class TimerAppContext : ApplicationContext
         catch (Exception ex) { _logger.Log("App", $"OverlayClicked: {ex.Message}"); }
     }
 
+    private void TogglePip()
+    {
+        try
+        {
+            if (_pip != null && !_pip.IsDisposed)
+            {
+                ClosePip();
+                return;
+            }
+            _pipVm = new PipViewModel(_timer);
+            _pipVm.LoadPosition(_configStore);
+            _pip = new PipForm(_pipVm, _logger, ToggleStartPause, DoLapAsync, DoStopAsync, ClosePip);
+            if (_pipVm.Position != Point.Empty)
+                _pip.Location = _pipVm.Position;
+            else
+            {
+                var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+                _pip.Location = new Point(area.Right - _pip.Width - 24, area.Bottom - _pip.Height - 24);
+            }
+            _pip.FormClosed += (_, _) => SavePipPosition();
+            _pip.Show();
+            _pipItem.Checked = true;
+            _pipVm.Visible = true;
+            _pipVm.Position = _pip.Location;
+            _pipVm.SavePosition(_configStore);
+            _pip.UpdateUi(new TimerTick(_timer.ElapsedSeconds, _timer.Running, 0, _timer.Laps));
+        }
+        catch (Exception ex) { _logger.Log("App", $"Pip: {ex.Message}"); }
+    }
+
+    private void ClosePip()
+    {
+        try
+        {
+            SavePipPosition();
+            _pip?.Close();
+            _pip?.Dispose();
+        }
+        catch { }
+        _pip = null;
+        _pipItem.Checked = false;
+    }
+
+    private void SavePipPosition()
+    {
+        try
+        {
+            if (_pipVm != null && _pip != null && !_pip.IsDisposed)
+            {
+                _pipVm.Position = _pip.Location;
+                _pipVm.Visible = _pip.Visible;
+                _pipVm.SavePosition(_configStore);
+            }
+            else if (_pipVm != null)
+            {
+                _pipVm.Visible = false;
+                _pipVm.SavePosition(_configStore);
+            }
+        }
+        catch (Exception ex) { _logger.Log("App", $"PipSave: {ex.Message}"); }
+    }
+
     private void OpenSettings()
     {
         try
@@ -281,10 +350,12 @@ public class TimerAppContext : ApplicationContext
         if (disposing)
         {
             try { if (_coordinator.SessionId.HasValue) _coordinator.StopAsync().GetAwaiter().GetResult(); } catch { }
+            try { SavePipPosition(); } catch { }
             _flushTimer.Dispose();
             _timer.Dispose();
             _store.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _configStore.Save(_config);
+            try { _pip?.Dispose(); } catch { }
             _overlay?.Dispose();
             _trayIcon?.Dispose();
         }
