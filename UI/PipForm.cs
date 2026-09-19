@@ -1,17 +1,17 @@
 namespace PulseTrack.Taskbar;
 
-public class PipForm : Form
+public class PipForm : Form, ITimerSurface
 {
-    private readonly PipViewModel _vm;
+    private static readonly Size _fixedSize = new(300, 88);
+
+    private readonly TimerCommands _commands;
+    private readonly IConfigStore _configStore;
+    private readonly Action _onRestore;
     private readonly IAppLogger _logger;
-    private readonly Action _onToggle;
-    private readonly Func<Task> _onLap;
-    private readonly Func<Task> _onStop;
-    private readonly Action _onClosePip;
 
     private readonly Label _appLabel = new() { AutoEllipsis = true };
-    private readonly Label _timeLabel = new() { TextAlign = ContentAlignment.MiddleCenter };
-    private readonly Label _lapLabel = new() { TextAlign = ContentAlignment.MiddleCenter };
+    private readonly Label _timeLabel = new() { TextAlign = ContentAlignment.MiddleLeft };
+    private readonly Label _lapLabel = new() { TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button _pauseBtn = new();
     private readonly Button _lapBtn = new() { Text = "🏁" };
     private readonly Button _stopBtn = new() { Text = "⏹" };
@@ -19,24 +19,31 @@ public class PipForm : Form
     private bool _dragging;
     private Point _dragStart;
 
-    public PipForm(PipViewModel vm, IAppLogger logger, Action onToggle, Func<Task> onLap, Func<Task> onStop, Action onClosePip)
+    public AppMode Mode => AppMode.Pip;
+
+    public PipForm(TimerCommands commands, IConfigStore configStore, Action onRestore, IAppLogger? logger = null)
     {
-        _vm = vm;
-        _logger = logger;
-        _onToggle = onToggle;
-        _onLap = onLap;
-        _onStop = onStop;
-        _onClosePip = onClosePip;
+        _commands = commands;
+        _configStore = configStore;
+        _onRestore = onRestore;
+        _logger = logger ?? NullLogger.Instance;
 
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(300, 88);
+        ClientSize = _fixedSize;
         BackColor = Color.FromArgb(30, 30, 34);
         ForeColor = Color.White;
         DoubleBuffered = true;
 
+        BuildLayout();
+        ApplyRounding();
+        Render(TimerViewState.Empty);
+    }
+
+    private void BuildLayout()
+    {
         _appLabel.Location = new Point(12, 6);
         _appLabel.Size = new Size(240, 16);
         _appLabel.Font = new Font("Segoe UI", 8, FontStyle.Regular);
@@ -48,16 +55,14 @@ public class PipForm : Form
 
         _closeBtn.Location = new Point(262, 4);
         _closeBtn.Size = new Size(30, 24);
-        _closeBtn.FlatStyle = FlatStyle.Flat;
-        _closeBtn.FlatAppearance.BorderSize = 0;
+        StyleButton(_closeBtn);
         _closeBtn.ForeColor = Color.FromArgb(150, 150, 150);
-        _closeBtn.Click += (_, _) => { try { _onClosePip(); } catch (Exception ex) { _logger.Log("Pip", $"Close: {ex.Message}"); } };
+        _closeBtn.Click += (_, _) => RestoreToNormal();
         Controls.Add(_closeBtn);
 
         _timeLabel.Location = new Point(12, 22);
         _timeLabel.Size = new Size(160, 34);
         _timeLabel.Font = new Font("Segoe UI", 20, FontStyle.Bold);
-        _timeLabel.TextAlign = ContentAlignment.MiddleLeft;
         _timeLabel.ForeColor = Color.White;
         _timeLabel.MouseDown += StartDrag;
         _timeLabel.MouseMove += DoDrag;
@@ -67,36 +72,33 @@ public class PipForm : Form
         _lapLabel.Location = new Point(12, 56);
         _lapLabel.Size = new Size(160, 16);
         _lapLabel.Font = new Font("Segoe UI", 8, FontStyle.Regular);
-        _lapLabel.TextAlign = ContentAlignment.MiddleLeft;
         _lapLabel.ForeColor = Color.FromArgb(150, 150, 150);
         Controls.Add(_lapLabel);
 
         var btnY = 26;
         var btnSize = new Size(26, 24);
+
         _pauseBtn.Location = new Point(180, btnY);
         _pauseBtn.Size = btnSize;
         StyleButton(_pauseBtn);
-        _pauseBtn.Click += (_, _) => { try { _onToggle(); } catch (Exception ex) { _logger.Log("Pip", $"Toggle: {ex.Message}"); } };
+        _pauseBtn.Click += async (_, _) => await _commands.ToggleStartPauseAsync().ConfigureAwait(true);
         Controls.Add(_pauseBtn);
 
         _lapBtn.Location = new Point(210, btnY);
         _lapBtn.Size = btnSize;
         StyleButton(_lapBtn);
-        _lapBtn.Click += async (_, _) => { try { await _onLap().ConfigureAwait(true); } catch (Exception ex) { _logger.Log("Pip", $"Lap: {ex.Message}"); } };
+        _lapBtn.Click += async (_, _) => await _commands.LapAsync().ConfigureAwait(true);
         Controls.Add(_lapBtn);
 
         _stopBtn.Location = new Point(180, 54);
         _stopBtn.Size = new Size(26, 22);
         StyleButton(_stopBtn);
-        _stopBtn.Click += async (_, _) => { try { await _onStop().ConfigureAwait(true); } catch (Exception ex) { _logger.Log("Pip", $"Stop: {ex.Message}"); } };
+        _stopBtn.Click += async (_, _) => await _commands.StopAsync().ConfigureAwait(true);
         Controls.Add(_stopBtn);
 
         MouseDown += StartDrag;
         MouseMove += DoDrag;
         MouseUp += EndDrag;
-
-        ApplyRounding();
-        UpdateUi(new TimerTick(0, false, 0, Array.Empty<LapInfo>()));
     }
 
     private static void StyleButton(Button btn)
@@ -142,26 +144,71 @@ public class PipForm : Form
 
     private void EndDrag(object? sender, MouseEventArgs e) => _dragging = false;
 
-    public void UpdateUi(TimerTick tick)
+    public void Render(TimerViewState state)
     {
         if (IsDisposed) return;
+
         if (InvokeRequired)
         {
-            try { BeginInvoke(() => UpdateUi(tick)); }
+            try { BeginInvoke(() => Render(state)); }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
             return;
         }
-        _vm.Refresh(tick);
-        _appLabel.Text = _vm.AppName;
-        _appLabel.ForeColor = _vm.AppName == "Choose app" ? Color.FromArgb(120, 120, 120) : Color.FromArgb(180, 180, 180);
-        _timeLabel.Text = _vm.ElapsedText;
-        _lapLabel.Text = _vm.LapText;
-        _pauseBtn.Text = _vm.PauseGlyph;
-        _pauseBtn.Enabled = _vm.CanPause || (!_vm.CanPause && _vm.CanStop);
-        _lapBtn.Enabled = _vm.CanLap;
-        _stopBtn.Enabled = _vm.CanStop;
+
+        _appLabel.Text = state.AppDisplay;
+        _appLabel.ForeColor = state.HasApp ? Color.FromArgb(180, 180, 180) : Color.FromArgb(120, 120, 120);
+        _timeLabel.Text = state.Clock;
+        _lapLabel.Text = state.LapText;
+        _pauseBtn.Text = state.Glyph;
+        _pauseBtn.Enabled = state.CanPause || state.CanStop;
+        _lapBtn.Enabled = state.CanLap;
+        _stopBtn.Enabled = state.CanStop;
     }
+
+    public void SetVisible(bool visible)
+    {
+        if (IsDisposed) return;
+
+        if (!visible)
+        {
+            PersistLocation();
+            if (Visible) Hide();
+            return;
+        }
+
+        if (!Visible)
+        {
+            RestoreLocation();
+            Show();
+        }
+    }
+
+    private void RestoreLocation()
+    {
+        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+        Location = WindowPlacement.Restore(_configStore.Load(), AppMode.Pip, Size, area);
+    }
+
+    private void PersistLocation()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        try { _configStore.Update(c => WindowPlacement.SaveLocation(c, AppMode.Pip, Location)); }
+        catch (Exception ex) { _logger.Log("Pip", $"SavePosition: {ex.Message}"); }
+    }
+
+    internal void RestoreToNormal()
+    {
+        try { _onRestore(); }
+        catch (Exception ex) { _logger.Log("Pip", $"Restore: {ex.Message}"); }
+    }
+
+    internal IReadOnlyList<Rectangle> ButtonBounds => new[]
+    {
+        _pauseBtn.Bounds, _lapBtn.Bounds, _stopBtn.Bounds, _closeBtn.Bounds
+    };
+
+    internal void SimulateSaveErrorForTest(Exception ex) => _logger.Log("Pip", $"SavePosition: {ex.Message}");
 
     protected override void OnResize(EventArgs e)
     {
@@ -173,6 +220,7 @@ public class PipForm : Form
     {
         if (disposing)
         {
+            PersistLocation();
             Region?.Dispose();
             foreach (Control c in Controls)
             {

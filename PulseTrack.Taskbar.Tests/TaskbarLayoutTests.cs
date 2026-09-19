@@ -23,19 +23,6 @@ public sealed class FakeTaskbarGeometry : ITaskbarGeometry
     public Rectangle GetScreenBounds(IntPtr hWnd) => ScreenBounds;
 }
 
-public sealed class FakeWidget : ITaskbarWidget
-{
-    public string Id => "fake";
-    public string? LastText { get; private set; }
-    public int WidthHint { get; set; } = 120;
-    public string TextToReturn { get; set; } = "";
-    public int RefreshCount { get; private set; }
-
-    public string GetText() => TextToReturn;
-    public int GetWidthHint() => WidthHint;
-    public void Refresh(TimerTick tick) { RefreshCount++; LastText = tick.ElapsedSeconds.ToString("F1"); }
-}
-
 public sealed class TaskbarLayoutTests
 {
     private static TaskbarLayout LeftLayout(FakeTaskbarGeometry geo) => new(geo, NullLogger.Instance);
@@ -144,79 +131,5 @@ public sealed class TaskbarLayoutTests
         Assert.True(TaskbarLayout.IsSystemWindow("Whatever", 10));
         Assert.True(TaskbarLayout.IsSystemWindow("Whatever", 900));
         Assert.False(TaskbarLayout.IsSystemWindow("Chrome_WidgetWin_1", 200));
-    }
-}
-
-public sealed class TimerWidgetTests
-{
-    private static TimerWidget Create(out FakeForegroundSource fg, out ManualTickScheduler sched, out ForegroundTimer timer)
-    {
-        fg = new FakeForegroundSource { Current = "Code" };
-        sched = new ManualTickScheduler();
-        timer = new ForegroundTimer(fg, sched);
-        return new TimerWidget(timer);
-    }
-
-    [Fact]
-    public void Id_IsStable()
-    {
-        var widget = Create(out _, out var sched, out var timer);
-        using (timer)
-        using (sched)
-        {
-            Assert.Equal("timer", widget.Id);
-        }
-    }
-
-    [Fact]
-    public void NoApp_ShowsChooseApp()
-    {
-        var widget = Create(out _, out var sched, out var timer);
-        using (timer)
-        using (sched)
-        {
-            Assert.Equal("Choose app", widget.GetText());
-        }
-    }
-
-    [Fact]
-    public void Running_ShowsPauseAction()
-    {
-        var widget = Create(out var fg, out var sched, out var timer);
-        using (timer)
-        using (sched)
-        {
-            timer.Start("Code");
-            fg.Current = "Code";
-            sched.Fire(4);
-
-            Assert.Equal("⏸ 00:00:02", widget.GetText());
-        }
-    }
-
-    [Fact]
-    public void Paused_ShowsStartAction()
-    {
-        var widget = Create(out var fg, out var sched, out var timer);
-        using (timer)
-        using (sched)
-        {
-            timer.Start("Code");
-            fg.Current = "Code";
-            sched.Fire(2);
-            timer.Pause();
-
-            Assert.Equal("▶ 00:00:01", widget.GetText());
-        }
-    }
-
-    [Fact]
-    public void Refresh_UpdatesCachedText()
-    {
-        var widget = new FakeWidget();
-        widget.Refresh(new TimerTick(3.5, true, 0, Array.Empty<LapInfo>()));
-
-        Assert.Equal(1, widget.RefreshCount);
-        Assert.Equal("3.5", widget.LastText);
     }
 }

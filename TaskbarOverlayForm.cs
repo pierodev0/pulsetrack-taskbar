@@ -1,14 +1,14 @@
 namespace PulseTrack.Taskbar;
 
-public class TaskbarOverlayForm : Form
+public class TaskbarOverlayForm : Form, ITimerSurface
 {
     private const int _scrollSpeed = 2;
     private const int _scrollIntervalMs = 50;
     private const int _zBumpIntervalMs = 100;
+    private const int _widthHint = 200;
 
     private readonly TaskbarLayout _layout;
     private readonly IAppLogger _logger;
-    private ITaskbarWidget _widget = new StaticTextWidget("");
 
     private string _text = "";
     private int _scrollOffset;
@@ -37,7 +37,7 @@ public class TaskbarOverlayForm : Form
         TransparencyKey = Color.Black;
         BackColor = Color.Black;
         DoubleBuffered = true;
-        Width = _widget.GetWidthHint();
+        Width = _widthHint;
         Height = TaskbarLayout.BarHeight;
 
         _scrollTimer.Interval = _scrollIntervalMs;
@@ -47,10 +47,31 @@ public class TaskbarOverlayForm : Form
         _reposTimer.Tick += (_, _) => { try { RepositionWithFullscreenCheck(); } catch (Exception ex) { _logger.Log("Overlay", $"ReposTimer: {ex.Message}"); } };
     }
 
-    public void SetWidget(ITaskbarWidget widget)
+    public AppMode Mode => AppMode.Taskbar;
+
+    public void Render(TimerViewState state) => SetTimer(state.HasApp ? state.GlyphClock : "Choose app");
+
+    public void SetVisible(bool visible)
     {
-        _widget = widget;
-        SetTimer(widget.GetText());
+        if (IsDisposed) return;
+
+        if (!visible)
+        {
+            _reposTimer.Stop();
+            _scrollTimer.Stop();
+            if (Visible) Visible = false;
+            return;
+        }
+
+        if (IsHandleCreated)
+        {
+            Reposition();
+            if (!_fullScreen) Visible = true;
+            _reposTimer.Start();
+            return;
+        }
+
+        Visible = true;
     }
 
     private void OnScrollTick()
@@ -81,7 +102,7 @@ public class TaskbarOverlayForm : Form
 
     private void RepositionWithFullscreenCheck()
     {
-        var pos = _layout.Compute(_widget.GetWidthHint());
+        var pos = _layout.Compute(_widthHint);
         bool wasFull = _fullScreen;
         _fullScreen = pos.Fullscreen;
 
@@ -106,7 +127,7 @@ public class TaskbarOverlayForm : Form
     {
         if (!IsHandleCreated || IsDisposed) return;
 
-        var pos = _layout.Compute(Math.Max(_textWidth + 30, _widget.GetWidthHint()));
+        var pos = _layout.Compute(Math.Max(_textWidth + 30, _widthHint));
         if (pos.Fullscreen)
         {
             Visible = false;
@@ -160,7 +181,7 @@ public class TaskbarOverlayForm : Form
         Invalidate();
     }
 
-    public void ApplyConfig(OverlayConfig config)
+    public void ApplyConfig(AppConfig config)
     {
         _font.Dispose();
         _font = new Font(config.FontFamily, config.FontSize, (FontStyle)config.FontStyle);
@@ -261,11 +282,4 @@ public class TaskbarOverlayForm : Form
         base.Dispose(disposing);
     }
 
-    private sealed class StaticTextWidget(string text) : ITaskbarWidget
-    {
-        public string Id => "static";
-        public string GetText() => text;
-        public int GetWidthHint() => 200;
-        public void Refresh(TimerTick tick) { }
-    }
 }

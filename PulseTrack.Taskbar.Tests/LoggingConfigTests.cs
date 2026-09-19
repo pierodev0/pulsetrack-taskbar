@@ -70,7 +70,7 @@ public sealed class ConfigStoreTests : IDisposable
     public void RoundTrip_PreservesValues()
     {
         var store = new FileConfigStore(_dir);
-        var config = new OverlayConfig { FontFamily = "Consolas", FontSize = 12f, LastApp = "Code" };
+        var config = new AppConfig { FontFamily = "Consolas", FontSize = 12f, LastApp = "Code" };
 
         store.Save(config);
         var loaded = store.Load();
@@ -89,6 +89,66 @@ public sealed class ConfigStoreTests : IDisposable
 
         Assert.Equal("Segoe UI", loaded.FontFamily);
         Assert.Equal("", loaded.LastApp);
+    }
+
+    [Fact]
+    public void Load_MissingFile_DefaultsToNormalMode()
+    {
+        var store = new FileConfigStore(_dir);
+
+        Assert.Equal(AppMode.Normal, store.Load().Mode);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesMode()
+    {
+        var store = new FileConfigStore(_dir);
+
+        store.Save(new AppConfig { Mode = AppMode.Pip });
+
+        Assert.Equal(AppMode.Pip, store.Load().Mode);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesWindowPlacements()
+    {
+        var store = new FileConfigStore(_dir);
+        store.Save(new AppConfig { PipX = 300, PipY = 200, NormalX = 10, NormalY = 20, NormalWidth = 400, NormalHeight = 320 });
+
+        var loaded = store.Load();
+
+        Assert.Equal(300, loaded.PipX);
+        Assert.Equal(200, loaded.PipY);
+        Assert.Equal(10, loaded.NormalX);
+        Assert.Equal(20, loaded.NormalY);
+        Assert.Equal(400, loaded.NormalWidth);
+        Assert.Equal(320, loaded.NormalHeight);
+    }
+
+    [Fact]
+    public void Update_PreservesFieldsItDoesNotTouch()
+    {
+        var store = new FileConfigStore(_dir);
+        store.Save(new AppConfig { Mode = AppMode.Pip, PipX = 300, PipY = 200, LastApp = "Code" });
+
+        store.Update(c => c.FontFamily = "Consolas");
+
+        var loaded = store.Load();
+        Assert.Equal("Consolas", loaded.FontFamily);
+        Assert.Equal(AppMode.Pip, loaded.Mode);
+        Assert.Equal(300, loaded.PipX);
+        Assert.Equal(200, loaded.PipY);
+        Assert.Equal("Code", loaded.LastApp);
+    }
+
+    [Fact]
+    public void Update_LoadsMutatesAndSaves()
+    {
+        var store = new FileConfigStore(_dir);
+
+        store.Update(c => c.LastApp = "Chrome");
+
+        Assert.Equal("Chrome", store.Load().LastApp);
     }
 
     [Fact]

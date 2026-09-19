@@ -6,7 +6,6 @@ public sealed class SettingsViewModel
     public const float MaxFontSize = 32f;
 
     private readonly IConfigStore _store;
-    private OverlayConfig _original = new();
 
     private float _fontSize = 12f;
 
@@ -34,7 +33,6 @@ public sealed class SettingsViewModel
     public void Load()
     {
         var config = _store.Load();
-        _original = config;
         FontFamily = config.FontFamily;
         FontSize = config.FontSize;
         Bold = (config.FontStyle & (int)FontStyle.Bold) != 0;
@@ -44,27 +42,25 @@ public sealed class SettingsViewModel
         BackgroundColor = Color.FromArgb(config.BackgroundColorArgb);
     }
 
-    public OverlayConfig Apply()
+    public AppConfig Apply()
     {
         var style = FontStyle.Regular;
         if (Bold) style |= FontStyle.Bold;
         if (Italic) style |= FontStyle.Italic;
 
-        var config = new OverlayConfig
+        AppConfig? updated = null;
+        _store.Update(c =>
         {
-            FontFamily = FontFamily,
-            FontSize = FontSize,
-            FontStyle = (int)style,
-            TextColorArgb = TextColor.ToArgb(),
-            TextAlpha = 255,
-            ShowBackground = ShowBackground,
-            BackgroundColorArgb = BackgroundColor.ToArgb(),
-            BackgroundAlpha = _original.BackgroundAlpha,
-            TransparencyKeyArgb = _original.TransparencyKeyArgb,
-            LastApp = _original.LastApp,
-        };
-        _original = config;
-        _store.Save(config);
-        return config;
+            c.FontFamily = FontFamily;
+            c.FontSize = FontSize;
+            c.FontStyle = (int)style;
+            c.TextColorArgb = TextColor.ToArgb();
+            c.TextAlpha = 255;
+            c.ShowBackground = ShowBackground;
+            c.BackgroundColorArgb = BackgroundColor.ToArgb();
+            updated = c;
+        });
+
+        return updated!;
     }
 }

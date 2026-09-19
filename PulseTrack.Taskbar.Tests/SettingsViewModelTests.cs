@@ -4,11 +4,17 @@ namespace PulseTrack.Taskbar.Tests;
 
 public sealed class InMemoryConfigStore : IConfigStore
 {
-    public OverlayConfig Config { get; set; } = new();
+    public AppConfig Config { get; set; } = new();
     public int SaveCount { get; private set; }
     public string ProbeLogPath => Path.Combine(Path.GetTempPath(), "probe.log");
-    public OverlayConfig Load() => Config;
-    public void Save(OverlayConfig config) { Config = config; SaveCount++; }
+    public AppConfig Load() => Config;
+    public void Save(AppConfig config) { Config = config; SaveCount++; }
+    public void Update(Action<AppConfig> mutate)
+    {
+        var config = Load();
+        mutate(config);
+        Save(config);
+    }
 }
 
 public sealed class SettingsViewModelTests
@@ -18,7 +24,7 @@ public sealed class SettingsViewModelTests
     {
         var store = new InMemoryConfigStore
         {
-            Config = new OverlayConfig { FontFamily = "Consolas", FontSize = 14f, ShowBackground = false }
+            Config = new AppConfig { FontFamily = "Consolas", FontSize = 14f, ShowBackground = false }
         };
         var vm = new SettingsViewModel(store);
 
@@ -63,6 +69,55 @@ public sealed class SettingsViewModelTests
         var applied = vm.Apply();
 
         Assert.Equal((int)(FontStyle.Bold | FontStyle.Italic), applied.FontStyle);
+    }
+
+    [Fact]
+    public void Apply_PreservesWindowPlacementsAndMode()
+    {
+        var store = new InMemoryConfigStore
+        {
+            Config = new AppConfig
+            {
+                Mode = AppMode.Pip,
+                PipX = 300,
+                PipY = 200,
+                NormalX = 40,
+                NormalY = 60,
+                NormalWidth = 420,
+                NormalHeight = 360,
+                LastApp = "Code",
+            }
+        };
+        var vm = new SettingsViewModel(store);
+        vm.Load();
+        vm.FontFamily = "Consolas";
+
+        vm.Apply();
+
+        Assert.Equal(AppMode.Pip, store.Config.Mode);
+        Assert.Equal(300, store.Config.PipX);
+        Assert.Equal(200, store.Config.PipY);
+        Assert.Equal(40, store.Config.NormalX);
+        Assert.Equal(60, store.Config.NormalY);
+        Assert.Equal(420, store.Config.NormalWidth);
+        Assert.Equal(360, store.Config.NormalHeight);
+        Assert.Equal("Code", store.Config.LastApp);
+    }
+
+    [Fact]
+    public void Apply_PreservesOverlayTransparencySettings()
+    {
+        var store = new InMemoryConfigStore
+        {
+            Config = new AppConfig { BackgroundAlpha = 90, TransparencyKeyArgb = unchecked((int)0xFF112233) }
+        };
+        var vm = new SettingsViewModel(store);
+        vm.Load();
+
+        vm.Apply();
+
+        Assert.Equal(90, store.Config.BackgroundAlpha);
+        Assert.Equal(unchecked((int)0xFF112233), store.Config.TransparencyKeyArgb);
     }
 
     [Fact]

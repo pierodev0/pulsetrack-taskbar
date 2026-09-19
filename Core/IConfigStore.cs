@@ -3,6 +3,7 @@ namespace PulseTrack.Taskbar;
 public interface IConfigStore
 {
     string ProbeLogPath { get; }
-    OverlayConfig Load();
-    void Save(OverlayConfig config);
+    AppConfig Load();
+    void Save(AppConfig config);
+    void Update(Action<AppConfig> mutate);
 }

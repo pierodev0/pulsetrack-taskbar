@@ -8,6 +8,7 @@ public sealed class FileConfigStore : IConfigStore
 
     private readonly string _settingsPath;
     private readonly IAppLogger _logger;
+    private readonly object _gate = new();
 
     public FileConfigStore(string? directory = null, IAppLogger? logger = null)
     {
@@ -19,35 +20,51 @@ public sealed class FileConfigStore : IConfigStore
 
     public string ProbeLogPath { get; }
 
-    public OverlayConfig Load()
+    public AppConfig Load()
     {
-        try
+        lock (_gate)
         {
-            if (File.Exists(_settingsPath))
+            try
             {
-                var json = File.ReadAllText(_settingsPath);
-                return JsonSerializer.Deserialize<OverlayConfig>(json, _jsonOptions) ?? new OverlayConfig();
+                if (File.Exists(_settingsPath))
+                {
+                    var json = File.ReadAllText(_settingsPath);
+                    return JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions) ?? new AppConfig();
+                }
             }
+            catch (Exception ex)
+            {
+                _logger.Log("Config", $"Load failed: {ex.GetType().Name}: {ex.Message}");
+            }
+            return new AppConfig();
         }
-        catch (Exception ex)
-        {
-            _logger.Log("Config", $"Load failed: {ex.GetType().Name}: {ex.Message}");
-        }
-        return new OverlayConfig();
     }
 
-    public void Save(OverlayConfig config)
+    public void Save(AppConfig config)
     {
-        try
+        lock (_gate)
         {
-            var dir = Path.GetDirectoryName(_settingsPath);
-            if (dir != null && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-            File.WriteAllText(_settingsPath, JsonSerializer.Serialize(config, _jsonOptions));
+            try
+            {
+                var dir = Path.GetDirectoryName(_settingsPath);
+                if (dir != null && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+                File.WriteAllText(_settingsPath, JsonSerializer.Serialize(config, _jsonOptions));
+            }
+            catch (Exception ex)
+            {
+                _logger.Log("Config", $"Save failed: {ex.GetType().Name}: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+    }
+
+    public void Update(Action<AppConfig> mutate)
+    {
+        lock (_gate)
         {
-            _logger.Log("Config", $"Save failed: {ex.GetType().Name}: {ex.Message}");
+            var config = Load();
+            mutate(config);
+            Save(config);
         }
     }
 }
