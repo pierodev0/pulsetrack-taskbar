@@ -108,7 +108,7 @@ y no por `SelectedApp`, y por eso el picker devuelve `AppSelection` en vez de un
 dotnet test PulseTrack.Taskbar.Tests -c Release
 ```
 
-138 tests xUnit. Fakes en archivos propios (`FakeSessionRepository.cs`) o junto
+142 tests xUnit. Fakes en archivos propios (`FakeSessionRepository.cs`) o junto
 al test (`FakeForegroundSource`, `ManualTickScheduler`, `FakeSessionStore`,
 `FakeClock`, `FakeLogger`, `FakeTaskbarGeometry`, `FakeSurface`).
 

@@ -168,10 +168,15 @@ public class PipForm : Form, ITimerSurface
         _timeLabel.Text = state.Clock;
         _lapLabel.Text = state.LapText;
         _pauseBtn.Text = state.Glyph;
-        _pauseBtn.Enabled = state.CanPause || state.CanStop;
         _lapBtn.Enabled = state.CanLap;
         _stopBtn.Enabled = state.CanStop;
     }
+
+    internal bool ToggleEnabled => _pauseBtn.Enabled;
+
+    internal bool LapEnabled => _lapBtn.Enabled;
+
+    internal bool StopEnabled => _stopBtn.Enabled;
 
     public void SetVisible(bool visible)
     {

@@ -8,7 +8,7 @@
 - **Win32 P/Invoke centralizado** — todo en `Infra/Win32/NativeMethods.cs` (`SetLastError` donde aplica); `WindowWatcher` y `Win32TaskbarGeometry` consumen de ahí, nada de `DllImport` suelto
 - **3 modos exclusivos** de UI (`AppMode`: `Normal` default / `Taskbar` / `Pip`), cada uno una `ITimerSurface`; `SurfaceHost` decide cuál se ve y le hace fan-out del estado. Cambio desde `Tray → Mode`
 - **Overlay** en taskbar (`TaskbarOverlayForm.cs`): scroll + fullscreen-hide + Z-bump 100ms; timers pausados mientras está oculto
-- **xUnit** — 138 tests en `PulseTrack.Taskbar.Tests/` (net9 windows, referencia al csproj principal, `InternalsVisibleTo` para hooks `internal ...ForTest`)
+- **xUnit** — 142 tests en `PulseTrack.Taskbar.Tests/` (net9 windows, referencia al csproj principal, `InternalsVisibleTo` para hooks `internal ...ForTest`)
 - Requiere **.NET 9 Desktop Runtime** (no el runtime común)
 - **Builds repetibles**: `global.json` fija SDK, `Directory.Build.props` (`Deterministic`, `TreatWarningsAsErrors`, `ContinuousIntegrationBuild`), paquetes pineados
 
@@ -75,6 +75,7 @@ dotnet run --project PulseTrack.Taskbar.csproj -c Release -- --log chrome
 - **Nueva superficie = nuevo `ITimerSurface`** (`Mode` + `Render(TimerViewState)` + `SetVisible(bool)`) sumado al array que recibe `SurfaceHost` — modo, visibilidad exclusiva, cache del último estado y logging ya resueltos.
 - **El estado se arma una sola vez** en `TimerViewStateFactory`; ningún form formatea texto por su cuenta (nada de `FormatHms` local, usar `ClockFormat`).
 - **La app elegida es un filtro opcional, no un requisito**: `SelectedApp` sobrevive a `Stop()` (es una preferencia, no parte de la sesión) y `null` significa "correr siempre". `StopAsync` se guarda por `SessionId`, nunca por `SelectedApp`.
+- **El botón de start/pause nunca se deshabilita**: `ToggleStartPauseAsync` siempre sirve (arranca, pausa o reanuda). Gatearlo con `CanPause` fue un bug en la PiP — `CanPause` es `Running`, no "se puede togglear".
 - **Cancelar ≠ elegir "sin app"** en el picker: por eso `AppSelection(bool Confirmed, string? AppName)` en vez de un `string?` suelto donde `null` sería ambiguo.
 - **Config con dueño único**: para escribir usar `IConfigStore.Update(c => ...)`, nunca guardar una copia completa en memoria (pisaría campos que otro dueño escribió: fue el bug de las coordenadas del PiP).
 - **Proyecto principal excluye tests**: `<Compile Remove="PulseTrack.Taskbar.Tests/**/*.cs" />` en el csproj (el glob del SDK si no compila los tests dentro del WinExe).
@@ -90,7 +91,7 @@ dotnet run --project PulseTrack.Taskbar.csproj -c Release -- --log chrome
 
 ## Testing
 
-- xUnit en `PulseTrack.Taskbar.Tests/` (138 tests): fakes en archivos propios (`FakeSessionRepository.cs`) o junto al test (`FakeSessionStore`, `FakeClock`, `FakeLogger`, `FakeTaskbarGeometry`, `FakeSurface`)
+- xUnit en `PulseTrack.Taskbar.Tests/` (142 tests): fakes en archivos propios (`FakeSessionRepository.cs`) o junto al test (`FakeSessionStore`, `FakeClock`, `FakeLogger`, `FakeTaskbarGeometry`, `FakeSurface`)
 - Unidades: `ForegroundTimer` (foreground/case/pause/resume/stop/laps/eventos, y el modo libre sin app), `SessionCoordinator` async (start/lap/stop/flush vía `FakeSessionStore`), `ChannelSessionStore` (ids de fondo, FIFO concurrente, drenado en dispose, close flow), `TimerViewStateFactory` (glifos/lap text/flags, reemplaza los tests de `PipViewModel` y `TimerWidget`), `SurfaceHost` (exclusividad de modos, estado cacheado al cambiar de modo, tolerancia a fallos), `TimerCommands` (arranque sin app, cancelar vs elegir "sin app", persistencia de `LastApp`), `WindowPlacement` (defaults, posiciones fuera de pantalla, round-trip), `AppModeParser`, `NormalForm` y `PipForm` (wiring de botones, filas de laps, layout sin solapamientos), logging/config (`FakeLogger`, `FileConfigStore` en temp dir, `IConfigStore.Update` preserva lo que no toca), `Database` real contra un temp dir (SQLite, `app_name` NULL vs vacío, close flow, reapertura), layout/widgets (`TaskbarLayout` con `FakeTaskbarGeometry`)
 - TDD: RED (test que falla) → GREEN (mínimo para pasar) → REFACTOR (migrar UI sin romper)
 - `dotnet test PulseTrack.Taskbar.Tests -c Release` antes de cada commit que toque `pulsetrack-taskbar/`

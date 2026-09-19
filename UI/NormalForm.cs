@@ -149,6 +149,8 @@ public class NormalForm : Form, ITimerSurface
     internal IReadOnlyList<string> LapRows =>
         _lapList.Items.Cast<object>().Select(i => i?.ToString() ?? "").ToList();
 
+    internal bool ToggleEnabled => _toggleBtn.Enabled;
+
     internal Rectangle LapListBounds => _lapList.Bounds;
 
     internal Rectangle TaskbarButtonBounds => _taskbarBtn.Bounds;

@@ -116,6 +116,16 @@ public sealed class NormalFormTests : IDisposable
     }
 
     [Fact]
+    public void Render_WhenStopped_StillAllowsStart()
+    {
+        using var form = Create();
+
+        form.Render(TimerViewState.Empty);
+
+        Assert.True(form.ToggleEnabled, "el boton de start debe estar habilitado aunque el cronometro este parado");
+    }
+
+    [Fact]
     public void ModeButtons_FitInsideTheClientArea()
     {
         using var form = Create();

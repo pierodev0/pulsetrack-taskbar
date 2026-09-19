@@ -109,6 +109,46 @@ public sealed class PipFormTests : IDisposable
     }
 
     [Fact]
+    public void Render_WhenStopped_StillAllowsStart()
+    {
+        using var form = Create();
+
+        form.Render(TimerViewState.Empty);
+
+        Assert.True(form.ToggleEnabled, "el boton de start debe estar habilitado aunque el cronometro este parado");
+        Assert.False(form.LapEnabled);
+        Assert.False(form.StopEnabled);
+    }
+
+    [Fact]
+    public void Render_WhenRunning_EnablesEveryAction()
+    {
+        using var form = Create();
+        var running = new TimerViewState(App, "00:00:05", true, "⏸", "Lap 1 · 00:00:05", true, true, true,
+            new[] { new LapInfo(1, "Lap 1", 5) });
+
+        form.Render(running);
+
+        Assert.True(form.ToggleEnabled);
+        Assert.True(form.LapEnabled);
+        Assert.True(form.StopEnabled);
+    }
+
+    [Fact]
+    public void Render_WhenPaused_AllowsResumeButNotLap()
+    {
+        using var form = Create();
+        var paused = new TimerViewState(App, "00:00:05", false, "▶", "Lap 1 · 00:00:05", false, false, true,
+            new[] { new LapInfo(1, "Lap 1", 5) });
+
+        form.Render(paused);
+
+        Assert.True(form.ToggleEnabled);
+        Assert.False(form.LapEnabled);
+        Assert.True(form.StopEnabled);
+    }
+
+    [Fact]
     public void Render_WithState_DoesNotThrow()
     {
         using var form = Create();
