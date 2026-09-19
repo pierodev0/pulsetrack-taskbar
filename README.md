@@ -35,7 +35,7 @@ arranque respeta el último modo usado.
 |---|---|---|
 | **Normal** | Ventana estándar: reloj grande, botones, lista de laps y un pie `View: [Taskbar] [PiP]` para saltar a los otros modos. **Es el modo por defecto.** | Botones `Taskbar` / `PiP` del pie, o `Tray → Mode` |
 | **Taskbar** | El overlay transparente sobre la barra de tareas. Click izquierdo = start/pause, derecho = menú del tray. Se oculta solo si hay una app en pantalla completa. | `Tray → Mode` |
-| **Picture in Picture** | Mini ventana flotante siempre visible (`TopMost`), arrastrable. Botones `⏸` `🏁` `⏹`. | `✕` vuelve a Normal, o `Tray → Mode` |
+| **Picture in Picture** | Mini ventana flotante siempre visible (`TopMost`), arrastrable. Botones `⏸` `🏁` `⏹` `⤢`. | `⤢` o `✕` vuelven a Normal, o `Tray → Mode` |
 
 Cada modo recuerda su posición (y la ventana Normal también su tamaño). La `X` de la
 ventana Normal la oculta a la bandeja sin cerrar la app (el cronómetro sigue
@@ -99,7 +99,7 @@ cuenta.
 dotnet test PulseTrack.Taskbar.Tests -c Release
 ```
 
-117 tests xUnit. Fakes en archivos propios (`FakeSessionRepository.cs`) o junto
+118 tests xUnit. Fakes en archivos propios (`FakeSessionRepository.cs`) o junto
 al test (`FakeForegroundSource`, `ManualTickScheduler`, `FakeSessionStore`,
 `FakeClock`, `FakeLogger`, `FakeTaskbarGeometry`, `FakeSurface`).
 

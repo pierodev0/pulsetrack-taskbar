@@ -15,6 +15,7 @@ public class PipForm : Form, ITimerSurface
     private readonly Button _pauseBtn = new();
     private readonly Button _lapBtn = new() { Text = "🏁" };
     private readonly Button _stopBtn = new() { Text = "⏹" };
+    private readonly Button _expandBtn = new() { Text = "⤢" };
     private readonly Button _closeBtn = new() { Text = "✕" };
     private bool _dragging;
     private Point _dragStart;
@@ -95,6 +96,12 @@ public class PipForm : Form, ITimerSurface
         StyleButton(_stopBtn);
         _stopBtn.Click += async (_, _) => await _commands.StopAsync().ConfigureAwait(true);
         Controls.Add(_stopBtn);
+
+        _expandBtn.Location = new Point(210, 54);
+        _expandBtn.Size = new Size(26, 22);
+        StyleButton(_expandBtn);
+        _expandBtn.Click += (_, _) => RestoreToNormal();
+        Controls.Add(_expandBtn);
 
         MouseDown += StartDrag;
         MouseMove += DoDrag;
@@ -205,8 +212,10 @@ public class PipForm : Form, ITimerSurface
 
     internal IReadOnlyList<Rectangle> ButtonBounds => new[]
     {
-        _pauseBtn.Bounds, _lapBtn.Bounds, _stopBtn.Bounds, _closeBtn.Bounds
+        _pauseBtn.Bounds, _lapBtn.Bounds, _stopBtn.Bounds, _expandBtn.Bounds, _closeBtn.Bounds
     };
+
+    internal Rectangle ExpandButtonBounds => _expandBtn.Bounds;
 
     internal void SimulateSaveErrorForTest(Exception ex) => _logger.Log("Pip", $"SavePosition: {ex.Message}");
 

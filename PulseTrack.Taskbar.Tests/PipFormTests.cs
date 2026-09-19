@@ -90,11 +90,22 @@ public sealed class PipFormTests : IDisposable
     }
 
     [Fact]
-    public void Layout_HasFourButtons()
+    public void Layout_HasFiveSquarelyPackedButtons()
     {
         using var form = Create();
 
-        Assert.Equal(4, form.ButtonBounds.Count);
+        Assert.Equal(5, form.ButtonBounds.Count);
+    }
+
+    [Fact]
+    public void ExpandButton_SitsInTheGridSlotNextToStop()
+    {
+        using var form = Create();
+        var expand = form.ExpandButtonBounds;
+
+        Assert.Equal(26, expand.Width);
+        Assert.True(expand.Left > form.ButtonBounds[2].Left, "el boton expandir debe ir a la derecha del de stop");
+        Assert.Equal(form.ButtonBounds[2].Top, expand.Top);
     }
 
     [Fact]

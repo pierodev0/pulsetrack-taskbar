@@ -7,7 +7,7 @@
 - **Win32 P/Invoke centralizado** — todo en `Infra/Win32/NativeMethods.cs` (`SetLastError` donde aplica); `WindowWatcher` y `Win32TaskbarGeometry` consumen de ahí, nada de `DllImport` suelto
 - **3 modos exclusivos** de UI (`AppMode`: `Normal` default / `Taskbar` / `Pip`), cada uno una `ITimerSurface`; `SurfaceHost` decide cuál se ve y le hace fan-out del estado. Cambio desde `Tray → Mode`
 - **Overlay** en taskbar (`TaskbarOverlayForm.cs`): scroll + fullscreen-hide + Z-bump 100ms; timers pausados mientras está oculto
-- **xUnit** — 117 tests en `PulseTrack.Taskbar.Tests/` (net9 windows, referencia al csproj principal, `InternalsVisibleTo` para hooks `internal ...ForTest`)
+- **xUnit** — 118 tests en `PulseTrack.Taskbar.Tests/` (net9 windows, referencia al csproj principal, `InternalsVisibleTo` para hooks `internal ...ForTest`)
 - Requiere **.NET 9 Desktop Runtime** (no el runtime común)
 - **Builds repetibles**: `global.json` fija SDK, `Directory.Build.props` (`Deterministic`, `TreatWarningsAsErrors`, `ContinuousIntegrationBuild`), paquetes pineados
 
@@ -46,7 +46,7 @@ Los modos de UI se cambian desde `Tray → Mode` y se persisten vía `SurfaceHos
 
 - **Normal** (default) → ventana estándar: reloj grande, botones, lista de laps y un pie `View:` con botones `Taskbar` / `PiP` (llaman a `NormalForm.SwitchTo`, que reenvía al `Action<AppMode>` inyectado desde el composition root). Mostrada con `Show()`, ocultada con `Hide()`. El cierre del usuario (X) se cancela y oculta a la bandeja; `NormalForm.AllowClose()` es el flag que deja pasar el cierre real en el shutdown.
 - **Taskbar** → overlay anclado a `Shell_TrayWnd`.
-- **Pip** → mini ventana `TopMost` arrastrable, 300x88. Grilla de botones: `⏸` pause/resume, `🏁` lap, `⏹` stop, más la `✕` de la esquina que vuelve a `Normal` (`RestoreToNormal` → `_onRestore`). La PiP no tiene un "cerrar" propio: modo y visibilidad son lo mismo.
+- **Pip** → mini ventana `TopMost` arrastrable, 300x88. Grilla 2x2 de botones: `⏸` pause/resume, `🏁` lap, `⏹` stop, `⤢` restaurar a `Normal` (slot libre en `(210, 54)`), más la `✕` de la esquina. La `✕` y el `⤢` hacen lo mismo (`RestoreToNormal` → `_onRestore`) porque la PiP no tiene un "cerrar" propio: modo y visibilidad son lo mismo.
 
 ```powershell
 dotnet run --project PulseTrack.Taskbar.csproj -c Release
@@ -87,7 +87,7 @@ dotnet run --project PulseTrack.Taskbar.csproj -c Release -- --log chrome
 
 ## Testing
 
-- xUnit en `PulseTrack.Taskbar.Tests/` (117 tests): fakes en archivos propios (`FakeSessionRepository.cs`) o junto al test (`FakeSessionStore`, `FakeClock`, `FakeLogger`, `FakeTaskbarGeometry`, `FakeSurface`)
+- xUnit en `PulseTrack.Taskbar.Tests/` (118 tests): fakes en archivos propios (`FakeSessionRepository.cs`) o junto al test (`FakeSessionStore`, `FakeClock`, `FakeLogger`, `FakeTaskbarGeometry`, `FakeSurface`)
 - Unidades: `ForegroundTimer` (foreground/case/pause/resume/stop/laps/eventos), `SessionCoordinator` async (pick/lap/stop/flush vía `FakeSessionStore`), `ChannelSessionStore` (ids de fondo, FIFO concurrente, drenado en dispose, close flow), `TimerViewStateFactory` (glifos/lap text/flags, reemplaza los tests de `PipViewModel` y `TimerWidget`), `SurfaceHost` (exclusividad de modos, estado cacheado al cambiar de modo, tolerancia a fallos), `TimerCommands` (fallback al picker, persistencia de `LastApp`), `WindowPlacement` (defaults, posiciones fuera de pantalla, round-trip), `AppModeParser`, `NormalForm` y `PipForm` (wiring de botones, filas de laps, layout sin solapamientos), logging/config (`FakeLogger`, `FileConfigStore` en temp dir, `IConfigStore.Update` preserva lo que no toca), layout/widgets (`TaskbarLayout` con `FakeTaskbarGeometry`)
 - TDD: RED (test que falla) → GREEN (mínimo para pasar) → REFACTOR (migrar UI sin romper)
 - `dotnet test PulseTrack.Taskbar.Tests -c Release` antes de cada commit que toque `pulsetrack-taskbar/`
