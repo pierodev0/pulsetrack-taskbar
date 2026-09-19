@@ -13,7 +13,7 @@ public sealed class TimerCommandsTests : IDisposable
     private readonly SessionCoordinator _coordinator;
     private readonly InMemoryConfigStore _config = new();
     private readonly List<string?> _pickerRequests = new();
-    private string? _pickerResult;
+    private AppSelection _pickerResult = AppSelection.Cancelled;
 
     public TimerCommandsTests()
     {
@@ -42,65 +42,93 @@ public sealed class TimerCommandsTests : IDisposable
     }
 
     [Fact]
-    public async Task Toggle_WithoutApp_OpensPickerAndStarts()
+    public async Task Toggle_WithoutSession_StartsWithoutOpeningPicker()
     {
-        _pickerResult = App;
         var commands = Create();
 
         await commands.ToggleStartPauseAsync();
 
-        Assert.Single(_pickerRequests);
-        Assert.Equal(App, _timer.SelectedApp);
+        Assert.Empty(_pickerRequests);
         Assert.True(_timer.Running);
+        Assert.Null(_timer.SelectedApp);
         Assert.Single(_store.Sessions);
+        Assert.Null(_store.Sessions[0].App);
     }
 
     [Fact]
-    public async Task Toggle_WithoutApp_PickerCancelled_DoesNotStart()
+    public async Task Toggle_WithSelectedApp_StartsFilteredSession()
     {
-        _pickerResult = null;
+        _pickerResult = AppSelection.Of(App);
         var commands = Create();
+        await commands.PickAppAsync();
+        await commands.StopAsync();
 
         await commands.ToggleStartPauseAsync();
 
-        Assert.Single(_pickerRequests);
-        Assert.Null(_timer.SelectedApp);
-        Assert.Empty(_store.Sessions);
+        Assert.True(_timer.Running);
+        Assert.Equal(App, _timer.SelectedApp);
+        Assert.Equal(2, _store.Sessions.Count);
     }
 
     [Fact]
-    public async Task Toggle_WithApp_PausesAndResumesWithoutPicker()
+    public async Task Toggle_WithSession_PausesAndResumes()
     {
-        _pickerResult = App;
         var commands = Create();
         await commands.ToggleStartPauseAsync();
 
         await commands.ToggleStartPauseAsync();
         Assert.False(_timer.Running);
-        Assert.Equal(App, _timer.SelectedApp);
 
         await commands.ToggleStartPauseAsync();
         Assert.True(_timer.Running);
-
-        Assert.Single(_pickerRequests);
     }
 
     [Fact]
-    public async Task PickApp_PersistsLastApp()
+    public async Task PickApp_StartsSessionWithChosenApp()
     {
-        _pickerResult = App;
+        _pickerResult = AppSelection.Of(App);
         var commands = Create();
 
         await commands.PickAppAsync();
 
+        Assert.Equal(App, _timer.SelectedApp);
+        Assert.True(_timer.Running);
+        Assert.Equal(App, _store.Sessions[0].App);
         Assert.Equal(App, _config.Config.LastApp);
+    }
+
+    [Fact]
+    public async Task PickApp_AnyApp_ClearsSelectionAndLastApp()
+    {
+        _config.Config.LastApp = "Chrome";
+        _pickerResult = AppSelection.AnyApp;
+        var commands = Create();
+
+        await commands.PickAppAsync();
+
+        Assert.Null(_timer.SelectedApp);
+        Assert.True(_timer.Running);
+        Assert.Null(_store.Sessions[0].App);
+        Assert.Equal("", _config.Config.LastApp);
+    }
+
+    [Fact]
+    public async Task PickApp_Cancelled_DoesNotStartAnything()
+    {
+        _pickerResult = AppSelection.Cancelled;
+        var commands = Create();
+
+        await commands.PickAppAsync();
+
+        Assert.False(_timer.Running);
+        Assert.Empty(_store.Sessions);
+        Assert.Single(_pickerRequests);
     }
 
     [Fact]
     public async Task PickApp_PassesSuggestedAppToPicker()
     {
         _config.Config.LastApp = "Chrome";
-        _pickerResult = "Chrome";
         var commands = Create();
 
         await commands.PickAppAsync();
@@ -111,10 +139,8 @@ public sealed class TimerCommandsTests : IDisposable
     [Fact]
     public async Task Lap_DelegatesToCoordinator()
     {
-        _pickerResult = App;
         var commands = Create();
-        await commands.PickAppAsync();
-        _fg.Current = App;
+        await commands.ToggleStartPauseAsync();
         _sched.Fire(4);
 
         await commands.LapAsync();
@@ -124,9 +150,9 @@ public sealed class TimerCommandsTests : IDisposable
     }
 
     [Fact]
-    public async Task Stop_ClosesSessionAndResets()
+    public async Task Stop_ClosesSessionAndKeepsSelectedApp()
     {
-        _pickerResult = App;
+        _pickerResult = AppSelection.Of(App);
         var commands = Create();
         await commands.PickAppAsync();
         _fg.Current = App;
@@ -134,13 +160,14 @@ public sealed class TimerCommandsTests : IDisposable
 
         await commands.StopAsync();
 
-        Assert.Null(_timer.SelectedApp);
+        Assert.False(_timer.Running);
+        Assert.Equal(App, _timer.SelectedApp);
         Assert.Null(_coordinator.SessionId);
         Assert.Equal("closed", _store.Sessions[0].Status);
     }
 
     [Fact]
-    public async Task Stop_WithoutApp_DoesNothing()
+    public async Task Stop_WithoutSession_DoesNothing()
     {
         var commands = Create();
 

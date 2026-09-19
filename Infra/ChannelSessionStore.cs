@@ -62,7 +62,7 @@ public sealed class ChannelSessionStore : ISessionStore
         return tcs.Task;
     }
 
-    public Task<long> CreateSessionAsync(string appName, string startTime, CancellationToken ct = default)
+    public Task<long> CreateSessionAsync(string? appName, string startTime, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         return Enqueue(() => _inner.CreateSession(appName, startTime));
@@ -80,7 +80,7 @@ public sealed class ChannelSessionStore : ISessionStore
         return Enqueue(() => { _inner.UpdateSessionDuration(id, durationSeconds); });
     }
 
-    public Task<long> CreateBlockAsync(long sessionId, string appName, string label, string startTime, CancellationToken ct = default)
+    public Task<long> CreateBlockAsync(long sessionId, string? appName, string label, string startTime, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         return Enqueue(() => _inner.CreateBlock(sessionId, appName, label, startTime));

@@ -115,7 +115,7 @@ public sealed class ForegroundTimerTests : IDisposable
     }
 
     [Fact]
-    public void Stop_ReturnsElapsedAndResets()
+    public void Stop_ReturnsElapsedAndResetsButKeepsSelectedApp()
     {
         _timer.Start(App);
         _fg.Current = App;
@@ -124,9 +124,75 @@ public sealed class ForegroundTimerTests : IDisposable
         var duration = _timer.Stop();
         Assert.Equal(2.0, duration, precision: 5);
         Assert.False(_timer.Running);
-        Assert.Null(_timer.SelectedApp);
+        Assert.Equal(App, _timer.SelectedApp);
         Assert.Equal(0, _timer.ElapsedSeconds);
         Assert.Empty(_timer.Laps);
+    }
+
+    [Fact]
+    public void Tick_WithoutApp_AccumulatesRegardlessOfForeground()
+    {
+        _timer.Start(null);
+
+        _fg.Current = "Other";
+        _sched.Fire(4);
+        Assert.Equal(2.0, _timer.ElapsedSeconds, precision: 5);
+
+        _fg.Current = null;
+        _sched.Fire(2);
+        Assert.Equal(3.0, _timer.ElapsedSeconds, precision: 5);
+    }
+
+    [Fact]
+    public void Tick_WithAppFilter_StillIgnoresOtherApps()
+    {
+        _timer.Start(App);
+        _fg.Current = "Other";
+        _sched.Fire(4);
+
+        Assert.Equal(0, _timer.ElapsedSeconds, precision: 5);
+    }
+
+    [Fact]
+    public void PauseResume_WithoutApp_KeepsCounting()
+    {
+        _timer.Start(null);
+        _sched.Fire(2);
+
+        _timer.Pause();
+        _sched.Fire(10);
+        Assert.Equal(1.0, _timer.ElapsedSeconds, precision: 5);
+
+        _timer.Resume();
+        _sched.Fire(2);
+        Assert.Equal(2.0, _timer.ElapsedSeconds, precision: 5);
+    }
+
+    [Fact]
+    public void Lap_WithoutApp_SplitsDurations()
+    {
+        _timer.Start(null);
+        _sched.Fire(4);
+        _timer.Lap();
+        _sched.Fire(2);
+
+        Assert.Equal(2, _timer.Laps.Count);
+        Assert.Equal(2.0, _timer.Laps[0].DurationSeconds, precision: 5);
+        Assert.Equal(1.0, _timer.Laps[1].DurationSeconds, precision: 5);
+        Assert.Equal(3.0, _timer.Laps.Sum(l => l.DurationSeconds), precision: 5);
+    }
+
+    [Fact]
+    public void Resume_WithoutApp_StartsTicking()
+    {
+        _timer.Start(null);
+        _timer.Pause();
+
+        _timer.Resume();
+        _sched.Fire(2);
+
+        Assert.True(_timer.Running);
+        Assert.Equal(1.0, _timer.ElapsedSeconds, precision: 5);
     }
 
     [Fact]

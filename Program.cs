@@ -142,27 +142,30 @@ public class TimerAppContext : ApplicationContext
         catch (Exception ex) { _logger.Log("App", $"OnTimerTick: {ex.Message}"); }
     }
 
-    private Task<string?> ShowAppPickerAsync(string? current)
+    private Task<AppSelection> ShowAppPickerAsync(string? current)
     {
         if (Environment.CurrentManagedThreadId == _uiThreadId)
             return Task.FromResult(RunPicker(current));
 
-        var result = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var result = new TaskCompletionSource<AppSelection>(TaskCreationOptions.RunContinuationsAsynchronously);
         _uiContext.Post(_ => result.SetResult(RunPicker(current)), null);
         return result.Task;
     }
 
-    private string? RunPicker(string? current)
+    private AppSelection RunPicker(string? current)
     {
         try
         {
             using var form = new AppPickerForm(current);
-            return form.ShowDialog() == DialogResult.OK ? form.SelectedApp : null;
+            if (form.ShowDialog() != DialogResult.OK)
+                return AppSelection.Cancelled;
+
+            return form.SelectedApp == null ? AppSelection.AnyApp : AppSelection.Of(form.SelectedApp);
         }
         catch (Exception ex)
         {
             _logger.Log("App", $"Picker: {ex.Message}");
-            return null;
+            return AppSelection.Cancelled;
         }
     }
 

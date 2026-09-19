@@ -20,7 +20,7 @@ public sealed class SessionCoordinator
 
     private string Now() => _clock.UtcNow.ToString("o");
 
-    public async Task PickAppAsync(string appName, CancellationToken ct = default)
+    public async Task StartAsync(string? appName, CancellationToken ct = default)
     {
         if (SessionId.HasValue)
             await StopAsync(ct).ConfigureAwait(false);
@@ -33,7 +33,7 @@ public sealed class SessionCoordinator
 
     public bool ToggleStartPause()
     {
-        if (_timer.SelectedApp == null)
+        if (!SessionId.HasValue)
             return false;
         if (_timer.Running)
             _timer.Pause();
@@ -49,21 +49,19 @@ public sealed class SessionCoordinator
         var elapsed = _timer.ElapsedSeconds;
         await _store.CloseBlockAsync(BlockId.Value, now, elapsed - _lastLapStart, ct).ConfigureAwait(false);
         _timer.Lap();
-        BlockId = await _store.CreateBlockAsync(SessionId.Value, _timer.SelectedApp!, $"Lap {_timer.Laps.Count}", now, ct).ConfigureAwait(false);
+        BlockId = await _store.CreateBlockAsync(SessionId.Value, _timer.SelectedApp, $"Lap {_timer.Laps.Count}", now, ct).ConfigureAwait(false);
         _lastLapStart = elapsed;
         await _store.UpdateSessionDurationAsync(SessionId.Value, elapsed, ct).ConfigureAwait(false);
     }
 
     public async Task<double> StopAsync(CancellationToken ct = default)
     {
-        if (_timer.SelectedApp == null) return 0;
+        if (!SessionId.HasValue) return 0;
         var now = Now();
         var elapsed = _timer.ElapsedSeconds;
-        if (SessionId.HasValue && BlockId.HasValue)
-        {
+        if (BlockId.HasValue)
             await _store.CloseBlockAsync(BlockId.Value, now, elapsed - _lastLapStart, ct).ConfigureAwait(false);
-            await _store.CloseSessionAsync(SessionId.Value, now, elapsed, ct).ConfigureAwait(false);
-        }
+        await _store.CloseSessionAsync(SessionId.Value, now, elapsed, ct).ConfigureAwait(false);
         _timer.Stop();
         SessionId = null;
         BlockId = null;

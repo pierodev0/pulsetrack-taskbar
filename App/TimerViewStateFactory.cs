@@ -5,7 +5,7 @@ public static class TimerViewStateFactory
     public static TimerViewState From(TimerTick tick, string? app)
     {
         if (string.IsNullOrEmpty(app))
-            return TimerViewState.Empty;
+            app = null;
 
         var laps = tick.Laps;
         return new TimerViewState(

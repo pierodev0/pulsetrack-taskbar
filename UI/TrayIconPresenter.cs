@@ -41,7 +41,7 @@ public sealed class TrayIconPresenter : IDisposable
         _icon = new NotifyIcon
         {
             Icon = SystemIcons.Application,
-            Text = "PulseTrack - Detenido",
+            Text = "PulseTrack",
             Visible = true,
             ContextMenuStrip = new ContextMenuStrip()
         };
@@ -126,11 +126,8 @@ public sealed class TrayIconPresenter : IDisposable
 
     private static string BuildTooltip(TimerViewState state)
     {
-        if (!state.HasApp)
-            return "PulseTrack - Detenido";
-
         var status = state.Running ? state.Clock : state.CanStop ? $"Paused {state.Clock}" : "Ready";
-        var text = $"PulseTrack - {status} · {state.AppName}";
+        var text = state.HasApp ? $"PulseTrack - {status} · {state.AppName}" : $"PulseTrack - {status}";
         return text.Length <= MaxTooltipLength ? text : text[..MaxTooltipLength];
     }
 

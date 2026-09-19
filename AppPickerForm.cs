@@ -2,12 +2,15 @@ namespace PulseTrack.Taskbar;
 
 public class AppPickerForm : Form
 {
+    private const string AnyAppLabel = "— Any app (plain stopwatch) —";
+
     private readonly ListBox _list = new();
     private readonly Button _okBtn = new() { Text = "OK", DialogResult = DialogResult.OK };
     private readonly Button _cancelBtn = new() { Text = "Cancel", DialogResult = DialogResult.Cancel };
     private readonly Button _refreshBtn = new() { Text = "Refresh" };
 
     private List<WindowInfo> _windows = new();
+    private string? _current;
 
     public string? SelectedApp { get; private set; }
 
@@ -29,7 +32,7 @@ public class AppPickerForm : Form
 
         _refreshBtn.Location = new Point(12, 260);
         _refreshBtn.Size = new Size(80, 28);
-        _refreshBtn.Click += (_, _) => LoadWindows(current);
+        _refreshBtn.Click += (_, _) => LoadWindows(_current);
         Controls.Add(_refreshBtn);
 
         _okBtn.Location = new Point(248, 260);
@@ -49,23 +52,32 @@ public class AppPickerForm : Form
 
     private void LoadWindows(string? current)
     {
+        _current = current;
         _windows = WindowWatcher.ListOpenWindows();
         _list.Items.Clear();
-        int selectIdx = -1;
+        _list.Items.Add(AnyAppLabel);
+
+        int selectIdx = 0;
         for (int i = 0; i < _windows.Count; i++)
         {
             var w = _windows[i];
             _list.Items.Add($"{w.ProcessName} — {w.Title}");
-            if (current != null && string.Equals(w.ProcessName, current, StringComparison.OrdinalIgnoreCase))
-                selectIdx = i;
+            if (!string.IsNullOrEmpty(current) && string.Equals(w.ProcessName, current, StringComparison.OrdinalIgnoreCase))
+                selectIdx = i + 1;
         }
-        if (selectIdx >= 0) _list.SelectedIndex = selectIdx;
-        else if (_list.Items.Count > 0) _list.SelectedIndex = 0;
+        _list.SelectedIndex = selectIdx;
     }
 
     private void AcceptSelection()
     {
-        if (_list.SelectedIndex >= 0 && _list.SelectedIndex < _windows.Count)
-            SelectedApp = _windows[_list.SelectedIndex].ProcessName;
+        if (_list.SelectedIndex <= 0)
+        {
+            SelectedApp = null;
+            return;
+        }
+
+        var index = _list.SelectedIndex - 1;
+        if (index < _windows.Count)
+            SelectedApp = _windows[index].ProcessName;
     }
 }

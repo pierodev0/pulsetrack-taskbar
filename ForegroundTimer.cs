@@ -101,11 +101,14 @@ public class ForegroundTimer : IDisposable
 
     internal void OnTick()
     {
-        if (!Running || SelectedApp == null) return;
+        if (!Running) return;
 
-        var active = _foreground.GetForegroundProcessName();
-        if (active == null || !string.Equals(active, SelectedApp, StringComparison.OrdinalIgnoreCase))
-            return;
+        if (SelectedApp != null)
+        {
+            var active = _foreground.GetForegroundProcessName();
+            if (!string.Equals(active, SelectedApp, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
 
         ElapsedSeconds += PollIntervalMs / 1000.0;
 
@@ -118,7 +121,7 @@ public class ForegroundTimer : IDisposable
         Emit();
     }
 
-    public void Start(string appName)
+    public void Start(string? appName)
     {
         SelectedApp = appName;
         ElapsedSeconds = 0;
@@ -136,7 +139,6 @@ public class ForegroundTimer : IDisposable
         Running = false;
         _scheduler.Stop();
         var duration = ElapsedSeconds;
-        SelectedApp = null;
         ElapsedSeconds = 0;
         _laps.Clear();
         Emit();
@@ -145,7 +147,7 @@ public class ForegroundTimer : IDisposable
 
     public void Lap()
     {
-        if (!Running || SelectedApp == null || _laps.Count == 0) return;
+        if (!Running || _laps.Count == 0) return;
         _laps.Add(new LapInfo(_laps.Count + 1, $"Lap {_laps.Count + 1}", 0));
         Emit();
     }
@@ -168,7 +170,6 @@ public class ForegroundTimer : IDisposable
 
     public void Resume()
     {
-        if (SelectedApp == null) return;
         Running = true;
         _scheduler.Stop();
         _scheduler.Start(OnTick);

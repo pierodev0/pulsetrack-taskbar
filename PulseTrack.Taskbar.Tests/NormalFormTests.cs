@@ -22,7 +22,7 @@ public sealed class NormalFormTests : IDisposable
     public void Dispose() => _timer.Dispose();
 
     private TimerCommands Commands() =>
-        new(_timer, _coordinator, _config, _ => Task.FromResult<string?>(null));
+        new(_timer, _coordinator, _config, _ => Task.FromResult(AppSelection.Cancelled));
 
     private NormalForm Create(IAppLogger? logger = null) => new(Commands(), _config, _requested.Add, logger);
 

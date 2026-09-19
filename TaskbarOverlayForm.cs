@@ -49,7 +49,7 @@ public class TaskbarOverlayForm : Form, ITimerSurface
 
     public AppMode Mode => AppMode.Taskbar;
 
-    public void Render(TimerViewState state) => SetTimer(state.HasApp ? state.GlyphClock : "Choose app");
+    public void Render(TimerViewState state) => SetTimer(state.GlyphClock);
 
     public void SetVisible(bool visible)
     {

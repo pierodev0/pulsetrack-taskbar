@@ -6,14 +6,11 @@ public sealed class Database : ISessionRepository
 {
     private readonly SqliteConnection _conn;
 
-    public Database()
+    public Database(string? directory = null)
     {
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "reloj-svelte", "sessions.db");
-        var dir = Path.GetDirectoryName(dbPath);
-        if (dir != null && !Directory.Exists(dir))
-            Directory.CreateDirectory(dir);
+        var dir = directory ?? FileLogger.DefaultDirectory();
+        Directory.CreateDirectory(dir);
+        var dbPath = Path.Combine(dir, "sessions.db");
 
         _conn = new SqliteConnection($"Data Source={dbPath}");
         _conn.Open();
@@ -24,7 +21,7 @@ public sealed class Database : ISessionRepository
             PRAGMA busy_timeout = 5000;
             CREATE TABLE IF NOT EXISTS app_sessions (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              app_name TEXT NOT NULL,
+              app_name TEXT,
               start_time TEXT NOT NULL,
               end_time TEXT,
               duration_seconds REAL NOT NULL DEFAULT 0,
@@ -34,10 +31,8 @@ public sealed class Database : ISessionRepository
             CREATE TABLE IF NOT EXISTS time_blocks (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               session_id INTEGER NOT NULL REFERENCES app_sessions(id),
-              app_name TEXT NOT NULL,
+              app_name TEXT,
               label TEXT NOT NULL,
-              raw_title TEXT,
-              source TEXT NOT NULL CHECK(source IN ('auto', 'manual')),
               start_time TEXT NOT NULL,
               end_time TEXT,
               duration_seconds REAL NOT NULL DEFAULT 0,
@@ -47,11 +42,11 @@ public sealed class Database : ISessionRepository
         cmd.ExecuteNonQuery();
     }
 
-    public long CreateSession(string appName, string startTime)
+    public long CreateSession(string? appName, string startTime)
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = "INSERT INTO app_sessions (app_name, start_time, duration_seconds, status, end_time) VALUES ($app, $start, 0, 'active', NULL); SELECT last_insert_rowid();";
-        cmd.Parameters.AddWithValue("$app", appName);
+        cmd.Parameters.AddWithValue("$app", (object?)appName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$start", startTime);
         return (long)cmd.ExecuteScalar()!;
     }
@@ -75,12 +70,12 @@ public sealed class Database : ISessionRepository
         cmd.ExecuteNonQuery();
     }
 
-    public long CreateBlock(long sessionId, string appName, string label, string startTime)
+    public long CreateBlock(long sessionId, string? appName, string label, string startTime)
     {
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO time_blocks (session_id, app_name, label, raw_title, source, start_time, duration_seconds, status, end_time) VALUES ($sid, $app, $label, NULL, 'manual', $start, 0, 'active', NULL); SELECT last_insert_rowid();";
+        cmd.CommandText = "INSERT INTO time_blocks (session_id, app_name, label, start_time, duration_seconds, status, end_time) VALUES ($sid, $app, $label, $start, 0, 'active', NULL); SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("$sid", sessionId);
-        cmd.Parameters.AddWithValue("$app", appName);
+        cmd.Parameters.AddWithValue("$app", (object?)appName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$label", label);
         cmd.Parameters.AddWithValue("$start", startTime);
         return (long)cmd.ExecuteScalar()!;

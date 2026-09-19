@@ -5,14 +5,14 @@ public sealed class TimerCommands
     private readonly ForegroundTimer _timer;
     private readonly SessionCoordinator _coordinator;
     private readonly IConfigStore _configStore;
-    private readonly Func<string?, Task<string?>> _pickApp;
+    private readonly Func<string?, Task<AppSelection>> _pickApp;
     private readonly IAppLogger _logger;
 
     public TimerCommands(
         ForegroundTimer timer,
         SessionCoordinator coordinator,
         IConfigStore configStore,
-        Func<string?, Task<string?>> pickApp,
+        Func<string?, Task<AppSelection>> pickApp,
         IAppLogger? logger = null)
     {
         _timer = timer;
@@ -30,9 +30,11 @@ public sealed class TimerCommands
     {
         try
         {
-            var chosen = await _pickApp(SuggestedApp).ConfigureAwait(true);
-            if (!string.IsNullOrEmpty(chosen))
-                await StartWithAsync(chosen!).ConfigureAwait(true);
+            var selection = await _pickApp(SuggestedApp).ConfigureAwait(true);
+            if (!selection.Confirmed) return;
+
+            await _coordinator.StartAsync(selection.AppName).ConfigureAwait(true);
+            _configStore.Update(c => c.LastApp = selection.AppName ?? "");
         }
         catch (Exception ex) { _logger.Log("App", $"PickApp: {ex.Message}"); }
     }
@@ -42,7 +44,7 @@ public sealed class TimerCommands
         try
         {
             if (_coordinator.ToggleStartPause()) return;
-            await PickAppAsync().ConfigureAwait(true);
+            await _coordinator.StartAsync(_timer.SelectedApp).ConfigureAwait(true);
         }
         catch (Exception ex) { _logger.Log("App", $"ToggleStartPause: {ex.Message}"); }
     }
@@ -55,17 +57,7 @@ public sealed class TimerCommands
 
     public async Task StopAsync()
     {
-        try
-        {
-            if (_timer.SelectedApp == null) return;
-            await _coordinator.StopAsync().ConfigureAwait(true);
-        }
+        try { await _coordinator.StopAsync().ConfigureAwait(true); }
         catch (Exception ex) { _logger.Log("App", $"Stop: {ex.Message}"); }
-    }
-
-    private async Task StartWithAsync(string appName)
-    {
-        await _coordinator.PickAppAsync(appName).ConfigureAwait(true);
-        _configStore.Update(c => c.LastApp = appName);
     }
 }

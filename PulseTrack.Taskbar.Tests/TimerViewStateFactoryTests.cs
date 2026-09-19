@@ -13,18 +13,42 @@ public sealed class TimerViewStateFactoryTests
     }
 
     [Fact]
-    public void NoApp_ReturnsEmptyState()
+    public void NoApp_StillShowsTheClock()
     {
         var state = TimerViewStateFactory.From(new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null);
 
         Assert.False(state.HasApp);
-        Assert.Equal("Choose app", state.AppDisplay);
+        Assert.Equal("Any app", state.AppDisplay);
         Assert.Equal("00:00:00", state.Clock);
+        Assert.Equal("▶ 00:00:00", state.GlyphClock);
         Assert.Equal("", state.LapText);
         Assert.False(state.CanPause);
         Assert.False(state.CanLap);
         Assert.False(state.CanStop);
         Assert.Empty(state.Laps);
+    }
+
+    [Fact]
+    public void NoApp_Running_ShowsRunningClock()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(75, true, 0, new[] { new LapInfo(1, "Lap 1", 75) }), null);
+
+        Assert.False(state.HasApp);
+        Assert.Equal("⏸ 00:01:15", state.GlyphClock);
+        Assert.Equal("Lap 1 · 00:01:15", state.LapText);
+        Assert.True(state.CanPause);
+        Assert.True(state.CanLap);
+        Assert.True(state.CanStop);
+    }
+
+    [Fact]
+    public void EmptyAppName_IsTreatedAsNoApp()
+    {
+        var state = TimerViewStateFactory.From(new TimerTick(0, false, 0, Array.Empty<LapInfo>()), "");
+
+        Assert.False(state.HasApp);
+        Assert.Equal("Any app", state.AppDisplay);
     }
 
     [Fact]
@@ -103,7 +127,7 @@ public sealed class TimerViewStateFactoryTests
     }
 
     [Fact]
-    public void ReadyState_CanStopButNotLap()
+    public void FreshState_CannotPauseLapOrStop()
     {
         var state = TimerViewStateFactory.From(new TimerTick(0, false, 0, Array.Empty<LapInfo>()), "Code");
 

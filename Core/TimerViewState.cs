@@ -16,7 +16,7 @@ public sealed record TimerViewState(
 
     public bool HasApp => !string.IsNullOrEmpty(AppName);
 
-    public string AppDisplay => HasApp ? AppName! : "Choose app";
+    public string AppDisplay => HasApp ? AppName! : "Any app";
 
     public string GlyphClock => $"{Glyph} {Clock}";
 }
