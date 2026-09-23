@@ -170,4 +170,78 @@ public sealed class TimerViewStateFactoryTests
         Assert.Equal("12:34", ClockFormat.Hmmss(754));
         Assert.Equal("1:00:00", ClockFormat.Hmmss(3600));
     }
+
+    [Fact]
+    public void NoCountdown_YieldsNullView()
+    {
+        var state = TimerViewStateFactory.From(new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null);
+
+        Assert.Null(state.Countdown);
+        Assert.False(state.HasCountdown);
+    }
+
+    [Fact]
+    public void ZeroTotalCountdown_YieldsNullView()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null, new CountdownState(0, 0, false, false));
+
+        Assert.Null(state.Countdown);
+    }
+
+    [Fact]
+    public void ActiveCountdown_FormatsRemainingAndFlags()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(65, true, 0, Array.Empty<LapInfo>()), null, new CountdownState(300, 300, true, false));
+
+        Assert.NotNull(state.Countdown);
+        Assert.Equal("5:00", state.Countdown!.Text);
+        Assert.True(state.Countdown.Running);
+        Assert.False(state.Countdown.Finished);
+        Assert.Equal("Timer 5:00", state.Countdown.Label);
+    }
+
+    [Fact]
+    public void PausedCountdown_LabelShowsPaused()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null,
+            new CountdownState(120, 300, false, false, Started: true));
+
+        Assert.Equal("2:00", state.Countdown!.Text);
+        Assert.Equal("Timer 2:00 (paused)", state.Countdown.Label);
+    }
+
+    [Fact]
+    public void StagedCountdown_LabelShowsReady()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null,
+            new CountdownState(120, 120, false, false));
+
+        Assert.Equal("2:00", state.Countdown!.Text);
+        Assert.False(state.Countdown.Started);
+        Assert.Equal("Timer 2:00 — ready", state.Countdown.Label);
+    }
+
+    [Fact]
+    public void FinishedCountdown_ShowsZeroAndTimeUps()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null, new CountdownState(0, 300, false, true));
+
+        Assert.Equal("0:00", state.Countdown!.Text);
+        Assert.True(state.Countdown.Finished);
+        Assert.Equal("Timer 0:00 — time's up!", state.Countdown.Label);
+    }
+
+    [Fact]
+    public void NegativeRemaining_IsClampedToZero()
+    {
+        var state = TimerViewStateFactory.From(
+            new TimerTick(0, false, 0, Array.Empty<LapInfo>()), null, new CountdownState(-0.5, 300, false, true));
+
+        Assert.Equal("0:00", state.Countdown!.Text);
+    }
 }

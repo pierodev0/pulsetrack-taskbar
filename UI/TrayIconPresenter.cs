@@ -10,6 +10,7 @@ public sealed class TrayIconPresenter : IDisposable
     private readonly Action _showActiveSurface;
     private readonly Action _openSettings;
     private readonly Action _toggleAutoStart;
+    private readonly Action _openCustomTimer;
     private readonly IAppLogger _logger;
 
     private readonly NotifyIcon _icon;
@@ -18,6 +19,8 @@ public sealed class TrayIconPresenter : IDisposable
     private readonly ToolStripMenuItem _lapItem;
     private readonly ToolStripMenuItem _stopItem;
     private readonly ToolStripMenuItem _showItem;
+    private readonly ToolStripMenuItem _countdownPauseItem;
+    private readonly ToolStripMenuItem _countdownCancelItem;
     private readonly Dictionary<AppMode, ToolStripMenuItem> _modeItems = new();
     private bool _disposed;
 
@@ -28,6 +31,7 @@ public sealed class TrayIconPresenter : IDisposable
         Action showActiveSurface,
         Action openSettings,
         Action toggleAutoStart,
+        Action openCustomTimer,
         IAppLogger? logger = null)
     {
         _commands = commands;
@@ -36,6 +40,7 @@ public sealed class TrayIconPresenter : IDisposable
         _showActiveSurface = showActiveSurface;
         _openSettings = openSettings;
         _toggleAutoStart = toggleAutoStart;
+        _openCustomTimer = openCustomTimer;
         _logger = logger ?? NullLogger.Instance;
 
         _icon = new NotifyIcon
@@ -65,6 +70,8 @@ public sealed class TrayIconPresenter : IDisposable
         _stopItem = new ToolStripMenuItem("⏹ Stop") { Enabled = false };
         _stopItem.Click += (_, _) => _ = _commands.StopAsync();
         menu.Items.Add(_stopItem);
+
+        menu.Items.Add(BuildTimerMenu(out _countdownPauseItem, out _countdownCancelItem));
 
         menu.Items.Add(new ToolStripSeparator());
 
@@ -98,6 +105,47 @@ public sealed class TrayIconPresenter : IDisposable
         return root;
     }
 
+    private ToolStripMenuItem BuildTimerMenu(out ToolStripMenuItem pauseItem, out ToolStripMenuItem cancelItem)
+    {
+        var root = new ToolStripMenuItem("Timer");
+
+        foreach (var (label, seconds) in new[] { ("5 minutes", 300), ("10 minutes", 600), ("25 minutes", 1500), ("1 hour", 3600) })
+        {
+            var preset = seconds;
+            root.DropDownItems.Add(label, null, (_, _) =>
+            {
+                try { _commands.StageCountdown(preset); }
+                catch (Exception ex) { Log("Timer", ex); }
+            });
+        }
+
+        root.DropDownItems.Add(new ToolStripSeparator());
+
+        root.DropDownItems.Add("Custom...", null, (_, _) =>
+        {
+            try { _openCustomTimer(); }
+            catch (Exception ex) { Log("Timer", ex); }
+        });
+
+        pauseItem = new ToolStripMenuItem("▶ Resume") { Enabled = false };
+        pauseItem.Click += (_, _) =>
+        {
+            try { _commands.ToggleCountdown(); }
+            catch (Exception ex) { Log("Timer", ex); }
+        };
+        root.DropDownItems.Add(pauseItem);
+
+        cancelItem = new ToolStripMenuItem("✕ Cancel") { Enabled = false };
+        cancelItem.Click += (_, _) =>
+        {
+            try { _commands.CancelCountdown(); }
+            catch (Exception ex) { Log("Timer", ex); }
+        };
+        root.DropDownItems.Add(cancelItem);
+
+        return root;
+    }
+
     private void AddModeItem(ToolStripMenuItem parent, AppMode mode, string text)
     {
         var item = new ToolStripMenuItem(text);
@@ -120,6 +168,13 @@ public sealed class TrayIconPresenter : IDisposable
         _lapItem.Enabled = state.CanLap;
         _stopItem.Enabled = state.CanStop;
 
+        var countdown = state.Countdown;
+        _countdownCancelItem.Enabled = countdown is not null;
+        _countdownPauseItem.Enabled = countdown is { Finished: false };
+        _countdownPauseItem.Text = countdown is { Running: true }
+            ? "⏸ Pause"
+            : countdown is { Started: true } ? "▶ Resume" : "▶ Start";
+
         _icon.Text = BuildTooltip(state);
         SyncModeChecks();
     }
@@ -127,7 +182,8 @@ public sealed class TrayIconPresenter : IDisposable
     private static string BuildTooltip(TimerViewState state)
     {
         var status = state.Running ? state.Clock : state.CanStop ? $"Paused {state.Clock}" : "Ready";
-        var text = state.HasApp ? $"PulseTrack - {status} · {state.AppName}" : $"PulseTrack - {status}";
+        var countdown = state.Countdown is null ? "" : $" · {state.Countdown.Label}";
+        var text = state.HasApp ? $"PulseTrack - {status}{countdown} · {state.AppName}" : $"PulseTrack - {status}{countdown}";
         return text.Length <= MaxTooltipLength ? text : text[..MaxTooltipLength];
     }
 

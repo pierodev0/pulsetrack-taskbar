@@ -22,4 +22,8 @@ public class AppConfig
     public int NormalHeight { get; set; } = 0;
 
     public string LastApp { get; set; } = "";
+
+    public int LastCountdownSeconds { get; set; } = 25 * 60;
+
+    public FocusMode Focus { get; set; } = FocusMode.Stopwatch;
 }

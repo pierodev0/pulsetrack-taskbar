@@ -9,6 +9,8 @@ public sealed class TimerCommandsTests : IDisposable
     private readonly FakeForegroundSource _fg = new() { Current = App };
     private readonly ManualTickScheduler _sched = new();
     private readonly ForegroundTimer _timer;
+    private readonly ManualTickScheduler _cdSched = new();
+    private readonly CountdownTimer _countdown;
     private readonly FakeSessionStore _store = new();
     private readonly SessionCoordinator _coordinator;
     private readonly InMemoryConfigStore _config = new();
@@ -18,12 +20,17 @@ public sealed class TimerCommandsTests : IDisposable
     public TimerCommandsTests()
     {
         _timer = new ForegroundTimer(_fg, _sched);
+        _countdown = new CountdownTimer(_cdSched);
         _coordinator = new SessionCoordinator(_timer, _store, new FakeClock());
     }
 
-    public void Dispose() => _timer.Dispose();
+    public void Dispose()
+    {
+        _timer.Dispose();
+        _countdown.Dispose();
+    }
 
-    private TimerCommands Create() => new(_timer, _coordinator, _config, current =>
+    private TimerCommands Create() => new(_timer, _coordinator, _countdown, _config, current =>
     {
         _pickerRequests.Add(current);
         return Task.FromResult(_pickerResult);
@@ -180,7 +187,7 @@ public sealed class TimerCommandsTests : IDisposable
     public async Task PickerFailure_IsLoggedAndSwallowed()
     {
         var logger = new FakeLogger();
-        var commands = new TimerCommands(_timer, _coordinator, _config,
+        var commands = new TimerCommands(_timer, _coordinator, _countdown, _config,
             _ => throw new InvalidOperationException("picker boom"), logger);
 
         var ex = await Record.ExceptionAsync(() => commands.PickAppAsync());
@@ -188,5 +195,150 @@ public sealed class TimerCommandsTests : IDisposable
         Assert.Null(ex);
         Assert.Single(logger.Entries);
         Assert.Contains("picker boom", logger.Entries[0].Message);
+    }
+
+    [Fact]
+    public void StartCountdown_StartsAndPersistsDuration()
+    {
+        var commands = Create();
+
+        commands.StartCountdown(600);
+
+        Assert.True(_countdown.Running);
+        Assert.Equal(600, _countdown.RemainingSeconds);
+        Assert.Equal(600, _config.Config.LastCountdownSeconds);
+    }
+
+    [Fact]
+    public void ToggleCountdown_PausesAndResumes()
+    {
+        var commands = Create();
+        commands.StartCountdown(300);
+
+        commands.ToggleCountdown();
+        Assert.False(_countdown.Running);
+
+        commands.ToggleCountdown();
+        Assert.True(_countdown.Running);
+    }
+
+    [Fact]
+    public void CancelCountdown_ClearsIt()
+    {
+        var commands = Create();
+        commands.StartCountdown(300);
+
+        commands.CancelCountdown();
+
+        Assert.False(_countdown.HasValue);
+        Assert.False(_countdown.Running);
+    }
+
+    [Fact]
+    public void StageCountdown_LoadsWithoutStarting()
+    {
+        var commands = Create();
+
+        commands.StageCountdown(120);
+
+        Assert.True(_countdown.HasValue);
+        Assert.False(_countdown.Running);
+        Assert.False(_countdown.Started);
+        Assert.Equal(120, _countdown.RemainingSeconds);
+        Assert.Equal(120, _config.Config.LastCountdownSeconds);
+    }
+
+    [Fact]
+    public void StageCountdown_IgnoredWhileRunning()
+    {
+        var commands = Create();
+        commands.StartCountdown(60);
+
+        commands.StageCountdown(300);
+
+        Assert.True(_countdown.Running);
+        Assert.Equal(60, _countdown.RemainingSeconds);
+    }
+
+    [Fact]
+    public void Focus_LoadsFromConfig()
+    {
+        _config.Config.Focus = FocusMode.Timer;
+
+        var commands = Create();
+
+        Assert.Equal(FocusMode.Timer, commands.Focus);
+    }
+
+    [Fact]
+    public void SetFocus_PersistsAndRaisesEventOnlyOnChange()
+    {
+        var commands = Create();
+        FocusMode? seen = null;
+        commands.FocusChanged += f => seen = f;
+
+        commands.SetFocus(FocusMode.Timer);
+
+        Assert.Equal(FocusMode.Timer, commands.Focus);
+        Assert.Equal(FocusMode.Timer, _config.Config.Focus);
+        Assert.Equal(FocusMode.Timer, seen);
+
+        seen = null;
+        commands.SetFocus(FocusMode.Timer);
+        Assert.Null(seen);
+    }
+
+    [Fact]
+    public async Task TogglePrimary_FocusStopwatch_TogglesTheStopwatch()
+    {
+        var commands = Create();
+
+        await commands.TogglePrimaryAsync();
+        Assert.True(_timer.Running);
+
+        await commands.TogglePrimaryAsync();
+        Assert.False(_timer.Running);
+    }
+
+    [Fact]
+    public async Task TogglePrimary_FocusTimer_TogglesTheCountdown()
+    {
+        _config.Config.Focus = FocusMode.Timer;
+        var commands = Create();
+        commands.StartCountdown(60);
+
+        await commands.TogglePrimaryAsync();
+        Assert.False(_countdown.Running);
+        Assert.False(_timer.Running);
+
+        await commands.TogglePrimaryAsync();
+        Assert.True(_countdown.Running);
+    }
+
+    [Fact]
+    public async Task StopPrimary_FocusTimer_CancelsCountdownAndKeepsSession()
+    {
+        _config.Config.Focus = FocusMode.Timer;
+        var commands = Create();
+        await commands.ToggleStartPauseAsync();
+        commands.StartCountdown(60);
+
+        await commands.StopPrimaryAsync();
+
+        Assert.False(_countdown.HasValue);
+        Assert.NotNull(_coordinator.SessionId);
+        Assert.True(_timer.Running);
+    }
+
+    [Fact]
+    public async Task StopPrimary_FocusStopwatch_StopsTheSession()
+    {
+        var commands = Create();
+        await commands.ToggleStartPauseAsync();
+
+        await commands.StopPrimaryAsync();
+
+        Assert.Null(_coordinator.SessionId);
+        Assert.False(_timer.Running);
     }
 }

@@ -47,6 +47,23 @@ public sealed class LoggingTests
     }
 
     [Fact]
+    public void TaskbarOverlayForm_FocusTimer_ShowsOnlyTheTimer()
+    {
+        using var form = new TaskbarOverlayForm(new FakeLogger());
+        var tick = new TimerTick(65, true, 0, Array.Empty<LapInfo>());
+        var countdown = new CountdownState(300, 600, true, false);
+
+        form.Render(TimerViewStateFactory.From(tick, null, countdown, FocusMode.Timer));
+        Assert.Equal("Timer 5:00", form.TimerText);
+
+        form.Render(TimerViewStateFactory.From(tick, null, countdown, FocusMode.Stopwatch));
+        Assert.Equal("⏸ 00:01:05 · Timer 5:00", form.TimerText);
+
+        form.Render(TimerViewStateFactory.From(tick, null, null, FocusMode.Timer));
+        Assert.Equal("Timer not set", form.TimerText);
+    }
+
+    [Fact]
     public void WindowWatcher_UsesInjectedLogger()
     {
         var logger = new FakeLogger();
@@ -107,6 +124,24 @@ public sealed class ConfigStoreTests : IDisposable
         store.Save(new AppConfig { Mode = AppMode.Pip });
 
         Assert.Equal(AppMode.Pip, store.Load().Mode);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesFocus()
+    {
+        var store = new FileConfigStore(_dir);
+
+        store.Save(new AppConfig { Focus = FocusMode.Timer });
+
+        Assert.Equal(FocusMode.Timer, store.Load().Focus);
+    }
+
+    [Fact]
+    public void Load_MissingFile_DefaultsToStopwatchFocus()
+    {
+        var store = new FileConfigStore(_dir);
+
+        Assert.Equal(FocusMode.Stopwatch, store.Load().Focus);
     }
 
     [Fact]

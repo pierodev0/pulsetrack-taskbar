@@ -45,6 +45,8 @@ public class TimerAppContext : ApplicationContext
     private readonly IConfigStore _configStore;
     private readonly IAppLogger _logger;
     private readonly ForegroundTimer _timer;
+    private readonly CountdownTimer _countdown;
+    private readonly IAlarm _alarm = new SystemAlarm();
     private readonly Database _db;
     private readonly ChannelSessionStore _store;
     private readonly SessionCoordinator _coordinator;
@@ -58,6 +60,9 @@ public class TimerAppContext : ApplicationContext
 
     private readonly int _uiThreadId;
     private readonly SynchronizationContext _uiContext;
+
+    private TimerTick _lastTick = new(0, false, 0, Array.Empty<LapInfo>());
+    private CountdownState _lastCountdown = new(0, 0, false, false);
 
     public TimerAppContext(AppMode? modeOverride = null)
         : this(modeOverride, FileLogger.Default, new FileConfigStore(), null, null)
@@ -74,9 +79,10 @@ public class TimerAppContext : ApplicationContext
         _timer = timer ?? new ForegroundTimer(new SystemForegroundSource(), new FormsTickScheduler(ForegroundTimer.PollIntervalMs, _logger));
         _store = store as ChannelSessionStore ?? new ChannelSessionStore(_db);
         _coordinator = new SessionCoordinator(_timer, _store, SystemClock.Instance);
+        _countdown = new CountdownTimer(new FormsTickScheduler(CountdownTimer.TickMs, _logger));
         try { _store.CloseStaleActiveAsync().GetAwaiter().GetResult(); } catch (Exception ex) { _logger.Log("App", $"Crash recovery: {ex.Message}"); }
 
-        _commands = new TimerCommands(_timer, _coordinator, _configStore, ShowAppPickerAsync, _logger);
+        _commands = new TimerCommands(_timer, _coordinator, _countdown, _configStore, ShowAppPickerAsync, _logger);
 
         var config = _configStore.Load();
 
@@ -88,7 +94,7 @@ public class TimerAppContext : ApplicationContext
         _overlay.ApplyConfig(config);
         _pip = new PipForm(_commands, _configStore, () => host?.SetMode(AppMode.Normal), _logger);
 
-        _overlay.LeftClicked += () => _ = _commands.ToggleStartPauseAsync();
+        _overlay.LeftClicked += () => _ = _commands.TogglePrimaryAsync();
         _overlay.RightClicked += () => tray?.ShowMenu();
 
         _surfaces = new SurfaceHost(new ITimerSurface[] { _normal, _overlay, _pip }, modeOverride ?? config.Mode, _logger);
@@ -102,10 +108,14 @@ public class TimerAppContext : ApplicationContext
             () => _surfaces.ShowActive(),
             OpenSettings,
             ToggleAutoStart,
+            OpenCustomTimerPicker,
             _logger);
         tray = _tray;
 
         _timer.Ticked += OnTimerTick;
+        _countdown.Ticked += OnCountdownTick;
+        _countdown.Expired += OnCountdownExpired;
+        _commands.FocusChanged += _ => RenderState();
 
         _flushTimer.Tick += async (_, _) =>
         {
@@ -127,19 +137,58 @@ public class TimerAppContext : ApplicationContext
 
     private void OnTimerTick(TimerTick tick)
     {
+        _lastTick = tick;
+        RenderState();
+    }
+
+    private void OnCountdownTick(CountdownState countdown)
+    {
+        _lastCountdown = countdown;
+        RenderState();
+    }
+
+    private void RenderState()
+    {
         try
         {
             if (Environment.CurrentManagedThreadId != _uiThreadId)
             {
-                _uiContext.Post(_ => OnTimerTick(tick), null);
+                _uiContext.Post(_ => RenderState(), null);
                 return;
             }
 
-            var state = TimerViewStateFactory.From(tick, _timer.SelectedApp);
+            var state = TimerViewStateFactory.From(_lastTick, _timer.SelectedApp, _lastCountdown, _commands.Focus);
             _surfaces.Render(state);
             _tray.Update(state);
         }
-        catch (Exception ex) { _logger.Log("App", $"OnTimerTick: {ex.Message}"); }
+        catch (Exception ex) { _logger.Log("App", $"RenderState: {ex.Message}"); }
+    }
+
+    private void OnCountdownExpired()
+    {
+        try { _alarm.Play(); }
+        catch (Exception ex) { _logger.Log("App", $"Alarm: {ex.Message}"); }
+
+        try
+        {
+            if (Environment.CurrentManagedThreadId != _uiThreadId)
+                _uiContext.Post(_ => _tray.Notify("Time's up!"), null);
+            else
+                _tray.Notify("Time's up!");
+        }
+        catch (Exception ex) { _logger.Log("App", $"ExpiryNotify: {ex.Message}"); }
+    }
+
+    private void OpenCustomTimerPicker()
+    {
+        try
+        {
+            var last = _configStore.Load().LastCountdownSeconds;
+            using var form = new TimerPickerForm(last);
+            if (form.ShowDialog() == DialogResult.OK)
+                _commands.StageCountdown(form.SelectedSeconds);
+        }
+        catch (Exception ex) { _logger.Log("App", $"TimerPicker: {ex.Message}"); }
     }
 
     private Task<AppSelection> ShowAppPickerAsync(string? current)
@@ -213,6 +262,7 @@ public class TimerAppContext : ApplicationContext
             try { if (_coordinator.SessionId.HasValue) _coordinator.StopAsync().GetAwaiter().GetResult(); } catch { }
             _flushTimer.Dispose();
             _timer.Dispose();
+            _countdown.Dispose();
             _store.DisposeAsync().AsTask().GetAwaiter().GetResult();
             _normal.AllowClose();
             _surfaces.Dispose();

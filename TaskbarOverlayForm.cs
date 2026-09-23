@@ -49,7 +49,15 @@ public class TaskbarOverlayForm : Form, ITimerSurface
 
     public AppMode Mode => AppMode.Taskbar;
 
-    public void Render(TimerViewState state) => SetTimer(state.GlyphClock);
+    public void Render(TimerViewState state)
+    {
+        if (state.Focus == FocusMode.Timer)
+            SetTimer(state.Countdown is { } countdown ? countdown.Label : "Timer not set");
+        else
+            SetTimer(state.HasCountdown ? $"{state.GlyphClock} · {state.Countdown!.Label}" : state.GlyphClock);
+    }
+
+    internal string TimerText => _text;
 
     public void SetVisible(bool visible)
     {

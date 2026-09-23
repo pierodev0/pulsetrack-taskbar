@@ -10,6 +10,7 @@ public class PipForm : Form, ITimerSurface
     private readonly IAppLogger _logger;
 
     private readonly Label _appLabel = new() { AutoEllipsis = true };
+    private readonly Label _countdownLabel = new() { AutoEllipsis = true, TextAlign = ContentAlignment.MiddleRight };
     private readonly Label _timeLabel = new() { TextAlign = ContentAlignment.MiddleLeft };
     private readonly Label _lapLabel = new() { TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button _pauseBtn = new();
@@ -46,13 +47,22 @@ public class PipForm : Form, ITimerSurface
     private void BuildLayout()
     {
         _appLabel.Location = new Point(12, 6);
-        _appLabel.Size = new Size(240, 16);
+        _appLabel.Size = new Size(160, 16);
         _appLabel.Font = new Font("Segoe UI", 8, FontStyle.Regular);
         _appLabel.ForeColor = Color.FromArgb(180, 180, 180);
         _appLabel.MouseDown += StartDrag;
         _appLabel.MouseMove += DoDrag;
         _appLabel.MouseUp += EndDrag;
         Controls.Add(_appLabel);
+
+        _countdownLabel.Location = new Point(176, 6);
+        _countdownLabel.Size = new Size(84, 16);
+        _countdownLabel.Font = new Font("Segoe UI", 8, FontStyle.Regular);
+        _countdownLabel.ForeColor = Color.FromArgb(255, 190, 90);
+        _countdownLabel.MouseDown += StartDrag;
+        _countdownLabel.MouseMove += DoDrag;
+        _countdownLabel.MouseUp += EndDrag;
+        Controls.Add(_countdownLabel);
 
         _closeBtn.Location = new Point(262, 4);
         _closeBtn.Size = new Size(30, 24);
@@ -82,7 +92,7 @@ public class PipForm : Form, ITimerSurface
         _pauseBtn.Location = new Point(180, btnY);
         _pauseBtn.Size = btnSize;
         StyleButton(_pauseBtn);
-        _pauseBtn.Click += async (_, _) => await _commands.ToggleStartPauseAsync().ConfigureAwait(true);
+        _pauseBtn.Click += async (_, _) => await TogglePrimaryAsync();
         Controls.Add(_pauseBtn);
 
         _lapBtn.Location = new Point(210, btnY);
@@ -94,7 +104,7 @@ public class PipForm : Form, ITimerSurface
         _stopBtn.Location = new Point(180, 54);
         _stopBtn.Size = new Size(26, 22);
         StyleButton(_stopBtn);
-        _stopBtn.Click += async (_, _) => await _commands.StopAsync().ConfigureAwait(true);
+        _stopBtn.Click += async (_, _) => await StopPrimaryAsync();
         Controls.Add(_stopBtn);
 
         _expandBtn.Location = new Point(210, 54);
@@ -165,11 +175,25 @@ public class PipForm : Form, ITimerSurface
 
         _appLabel.Text = state.AppDisplay;
         _appLabel.ForeColor = state.HasApp ? Color.FromArgb(180, 180, 180) : Color.FromArgb(120, 120, 120);
-        _timeLabel.Text = state.Clock;
-        _lapLabel.Text = state.LapText;
-        _pauseBtn.Text = state.Glyph;
-        _lapBtn.Enabled = state.CanLap;
-        _stopBtn.Enabled = state.CanStop;
+
+        if (state.Focus == FocusMode.Timer)
+        {
+            _countdownLabel.Text = "";
+            _timeLabel.Text = state.Countdown?.Text ?? "0:00";
+            _lapLabel.Text = state.Countdown?.Label ?? "No timer set";
+            _pauseBtn.Text = state.Countdown is { Running: true } ? "⏸" : "▶";
+            _lapBtn.Enabled = false;
+            _stopBtn.Enabled = state.HasCountdown;
+        }
+        else
+        {
+            _countdownLabel.Text = state.Countdown?.Label ?? "";
+            _timeLabel.Text = state.Clock;
+            _lapLabel.Text = state.LapText;
+            _pauseBtn.Text = state.Glyph;
+            _lapBtn.Enabled = state.CanLap;
+            _stopBtn.Enabled = state.CanStop;
+        }
     }
 
     internal bool ToggleEnabled => _pauseBtn.Enabled;
@@ -177,6 +201,22 @@ public class PipForm : Form, ITimerSurface
     internal bool LapEnabled => _lapBtn.Enabled;
 
     internal bool StopEnabled => _stopBtn.Enabled;
+
+    internal string PrimaryClockText => _timeLabel.Text;
+
+    internal string SecondaryText => _lapLabel.Text;
+
+    internal string MiniCountdownText => _countdownLabel.Text;
+
+    internal string PauseGlyph => _pauseBtn.Text;
+
+    private async Task TogglePrimaryAsync() => await _commands.TogglePrimaryAsync().ConfigureAwait(true);
+
+    private async Task StopPrimaryAsync() => await _commands.StopPrimaryAsync().ConfigureAwait(true);
+
+    internal Task ClickPauseForTest() => TogglePrimaryAsync();
+
+    internal Task ClickStopForTest() => StopPrimaryAsync();
 
     public void SetVisible(bool visible)
     {
